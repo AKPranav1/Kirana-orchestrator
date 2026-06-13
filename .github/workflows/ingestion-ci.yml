@@ -13,6 +13,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r ingestion/requirements.txt
+          pip install -r db-alerts/requirements.txt
           pip install pytest
       - name: Run tests
         run: pytest -q
