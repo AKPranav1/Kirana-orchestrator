@@ -14,6 +14,8 @@ import xgboost as xgb
 from sklearn.preprocessing import LabelEncoder
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from sklearn.metrics import classification_report, accuracy_score, f1_score
+import joblib
+import os
 
 
 def load_and_preprocess():
@@ -119,6 +121,8 @@ def train_sales_regressor(X_train, y_train, X_test, y_test, feature_names):
     for idx in indices[:8]:
         print(f"  - {feature_names[idx]:<22}: {importances[idx]:.4f}")
 
+    return reg
+
 
 def train_stockout_classifier(X_train, y_train, X_test, y_test, feature_names):
     """
@@ -168,6 +172,8 @@ def train_stockout_classifier(X_train, y_train, X_test, y_test, feature_names):
     for idx in indices[:8]:
         print(f"  - {feature_names[idx]:<22}: {importances[idx]:.4f}")
 
+    return clf
+
 
 if __name__ == "__main__":
     import os
@@ -205,7 +211,7 @@ if __name__ == "__main__":
         X_test_reg = test_df[feature_cols].values
         y_test_reg = test_df["quantity_sold"].values
 
-        train_sales_regressor(
+        reg = train_sales_regressor(
             X_train_reg, y_train_reg, X_test_reg, y_test_reg, feature_cols
         )
 
@@ -215,9 +221,49 @@ if __name__ == "__main__":
         X_test_clf = test_df[feature_cols].values
         y_test_clf = test_df["stockout_occurred"].values
 
-        train_stockout_classifier(
+        clf = train_stockout_classifier(
             X_train_clf, y_train_clf, X_test_clf, y_test_clf, feature_cols
         )
+
+        # === Build a simple per-product forecast payload and serialize it ===
+        print("\nBuilding per-product forecast payload...")
+        forecasts = []
+        # Use test_df grouped by product_name and average regressor predictions
+        X_test_df = test_df[feature_cols].values
+        try:
+            preds = reg.predict(X_test_df)
+            preds = np.maximum(0, preds)
+        except Exception:
+            preds = np.zeros(len(test_df))
+
+        test_df_copy = test_df.copy().reset_index(drop=True)
+        test_df_copy["predicted_qty"] = preds
+
+        for product, g in test_df_copy.groupby("product_name"):
+            pred_mean = float(g["predicted_qty"].mean())
+            # heuristics for current_stock and recommended reorder
+            current_stock = 10
+            predicted_stockout_days = int(current_stock / max(1.0, pred_mean)) if pred_mean > 0 else 0
+            recommended_reorder_quantity = max(0, int(pred_mean * 7 - current_stock))
+            forecasts.append(
+                {
+                    "productId": product.replace(" ", "-").lower(),
+                    "product_name": product,
+                    "current_stock": current_stock,
+                    "predicted_daily_demand": round(pred_mean, 2),
+                    "predicted_stockout_days": predicted_stockout_days,
+                    "recommended_reorder_quantity": recommended_reorder_quantity,
+                    "confidence": 0.8,
+                    "recommendation_text": f"Predicted daily demand {pred_mean:.1f}. Order {recommended_reorder_quantity} units.",
+                }
+            )
+
+        # Ensure output directory exists in db_alerts
+        out_path = os.path.join(os.path.dirname(__file__), "..", "db_alerts", "model_forecasts.pkl")
+        out_path = os.path.abspath(out_path)
+        os.makedirs(os.path.dirname(out_path), exist_ok=True)
+        joblib.dump(forecasts, out_path)
+        print(f"Serialized {len(forecasts)} forecasts to {out_path}")
 
     except Exception as e:
         print(f"\n❌ Error during execution: {e}")

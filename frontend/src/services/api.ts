@@ -194,8 +194,16 @@ export const apiClient = {
 
   // --- ORDERS ---
   getOrders: async (): Promise<Order[]> => {
-    await delay(300);
-    return getStored<Order[]>('ka_orders');
+    // fetch from backend live orders
+    try {
+      const res = await fetch('http://localhost:8002/orders');
+      if (!res.ok) return [];
+      const json = await res.json();
+      return json.orders || [];
+    } catch (e) {
+      await delay(300);
+      return getStored<Order[]>('ka_orders');
+    }
   },
 
   createOrder: async (orderData: Omit<Order, 'id' | 'createdAt'>): Promise<Order> => {
@@ -389,94 +397,27 @@ export const apiClient = {
 
   // --- WHATSAPP SIMULATED SERVICE ENGINE ---
   extractOrderFromWhatsApp: async (textMsg: string): Promise<{ order: Order | null; error?: string }> => {
-    await delay(1500); // realistic AI prediction extraction latency
-    const products = getStored<Product[]>('ka_products');
-    
-    // Simulating call to server-side Gemini to extract structured fields.
-    // Since in FE we mock the service, let's write intelligent regex and keyword searches 
-    // to dynamically parse message like "10kg atta, 5 packets amul milk" and map to actual db items!
-    
-    const items: { productId: string; productName: string; quantity: number; price: number }[] = [];
-    let totalAmt = 0;
-    
-    const lower = textMsg.toLowerCase();
-    
-    // Look for Atta
-    if (lower.includes('atta')) {
-      const match = lower.match(/(\d+)\s*(?:kg|unit|pack|bag|packet)?\s*atta/i) || lower.match(/atta\s*(\d+)/i);
-      const qty = match ? parseInt(match[1]) : 1;
-      const attaprod = products.find(p => p.name.toLowerCase().includes('atta')) || products[0];
-      items.push({
-        productId: attaprod.id,
-        productName: attaprod.name,
-        quantity: qty,
-        price: attaprod.unitPrice
+    // Forward extraction to the ingestion service and persist via db_alerts
+    try {
+      const r1 = await fetch('http://localhost:8001/process', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ payload_type: 'text', payload: textMsg, customer_phone: 'unknown' }),
       });
-      totalAmt += attaprod.unitPrice * qty;
-    }
-    
-    // Look for Milk
-    if (lower.includes('milk') || lower.includes('amul')) {
-      const match = lower.match(/(\d+)\s*(?:pack|litre|liter|packet|unit| pouch)?\s*(?:milk|amul)/i) || lower.match(/(?:milk|amul)\s*(\d+)/i);
-      const qty = match ? parseInt(match[1]) : 2;
-      const milkprod = products.find(p => p.name.toLowerCase().includes('milk')) || products[1];
-      items.push({
-        productId: milkprod.id,
-        productName: milkprod.name,
-        quantity: qty,
-        price: milkprod.unitPrice
+      if (!r1.ok) return { order: null, error: 'Extraction failed' };
+      const flatOrder = await r1.json();
+
+      const r2 = await fetch('http://localhost:8002/log', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ order: flatOrder, shopkeeper_phone: 'whatsapp:+919986013436' }),
       });
-      totalAmt += milkprod.unitPrice * qty;
+      if (!r2.ok) return { order: null, error: 'Persist failed' };
+      const persisted = await r2.json();
+      return { order: persisted.order };
+    } catch (e: any) {
+      return { order: null, error: e?.message || String(e) };
     }
-
-    // Look for Salt
-    if (lower.includes('salt') || lower.includes('tata')) {
-      const match = lower.match(/(\d+)\s*(?:pack|kg|packet|unit)?\s*(?:salt|tata)/i) || lower.match(/(?:salt|tata)\s*(\d+)/i);
-      const qty = match ? parseInt(match[1]) : 1;
-      const saltprod = products.find(p => p.name.toLowerCase().includes('salt')) || products[2];
-      items.push({
-        productId: saltprod.id,
-        productName: saltprod.name,
-        quantity: qty,
-        price: saltprod.unitPrice
-      });
-      totalAmt += saltprod.unitPrice * qty;
-    }
-
-    // Look for Maggi
-    if (lower.includes('maggi') || lower.includes('noodles')) {
-      const match = lower.match(/(\d+)\s*(?:pack|packet|unit|noodle)?\s*(?:maggi|noodle)/i) || lower.match(/(?:maggi|noodle)\s*(\d+)/i);
-      const qty = match ? parseInt(match[1]) : 1;
-      const maggi = products.find(p => p.name.toLowerCase().includes('maggi')) || products[3];
-      items.push({
-        productId: maggi.id,
-        productName: maggi.name,
-        quantity: qty,
-        price: maggi.unitPrice
-      });
-      totalAmt += maggi.unitPrice * qty;
-    }
-
-    if (items.length === 0) {
-      return { order: null, error: "AI could not identify any matching catalog products from this message." };
-    }
-
-    // Determine customer name if possible
-    let name = "Raveen K.";
-    const matches = lower.match(/(?:from|name|i am|this is)\s*([a-z]+(?:\s+[a-z]+)?)/i);
-    if (matches && matches[1]) {
-      name = matches[1].split(' ').map(w => w.charAt(0).toUpperCase() + w.substr(1)).join(' ');
-    }
-
-    const createdOrder = await apiClient.createOrder({
-      customerName: name,
-      items,
-      totalAmount: totalAmt,
-      status: 'Processed',
-      source: 'WhatsApp'
-    });
-
-    return { order: createdOrder };
   }
 };
 

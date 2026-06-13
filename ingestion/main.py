@@ -1,6 +1,7 @@
 import os
 import httpx
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from dotenv import load_dotenv
@@ -18,6 +19,15 @@ TWILIO_SID   = os.getenv("TWILIO_ACCOUNT_SID")
 TWILIO_TOKEN = os.getenv("TWILIO_AUTH_TOKEN")
 
 app = FastAPI(title="Kirana AI — Ingestion", version="1.0.0")
+
+# Allow CORS for local frontend during development
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 CATALOG_PATH = os.path.join(os.path.dirname(__file__), "data", "sku_catalog.json")
 matcher = SKUMatcher(CATALOG_PATH)
