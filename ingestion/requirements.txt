@@ -1,0 +1,7 @@
+fastapi
+httpx
+pydantic
+uvicorn
+rapidfuzz
+orjson
+python-multipart

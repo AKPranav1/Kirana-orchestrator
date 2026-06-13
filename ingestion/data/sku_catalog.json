@@ -1,0 +1,13 @@
+{
+  "store_default": {
+    "aata":   {"canonical": "Wheat Flour",    "unit": "kg",     "aliases": ["atta", "aata", "आटा", "gehun atta"]},
+    "doodh":  {"canonical": "Milk",           "unit": "litre",  "aliases": ["milk", "दूध", "doodh"]},
+    "chawal": {"canonical": "Rice",           "unit": "kg",     "aliases": ["rice", "चावल", "chawal"]},
+    "chini":  {"canonical": "Sugar",          "unit": "kg",     "aliases": ["sugar", "चीनी", "chini"]},
+    "namak":  {"canonical": "Salt",           "unit": "kg",     "aliases": ["salt", "नमक", "namak"]},
+    "tel":    {"canonical": "Cooking Oil",    "unit": "litre",  "aliases": ["oil", "तेल", "sarso tel", "tel"]},
+    "sabun":  {"canonical": "Soap",           "unit": "piece",  "aliases": ["soap", "साबुन", "sabun"]},
+    "maggi":  {"canonical": "Instant Noodles","unit": "packet", "aliases": ["noodles", "मैगी", "maggi"]},
+    "chai":   {"canonical": "Tea",            "unit": "gm",     "aliases": ["tea", "चाय", "chai", "chai patti"]}
+  }
+}
