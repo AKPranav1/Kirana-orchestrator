@@ -1,7 +1,6 @@
 from pydantic import BaseModel, Field
 from typing import List, Optional, Any
 
-
 class Item(BaseModel):
     name: str
     qty: float
@@ -9,7 +8,6 @@ class Item(BaseModel):
     unit_price: Optional[float] = None
     match_score: Optional[float] = None
     original_name: Optional[str] = None
-
 
 class Order(BaseModel):
     customer_phone: Optional[str] = None

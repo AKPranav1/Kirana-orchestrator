@@ -1,7 +1,7 @@
 fastapi
+uvicorn
 httpx
 pydantic
-uvicorn
 rapidfuzz
-orjson
 python-multipart
+python-dotenv
