@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Master script to run the synthetic data generation pipeline.
+Master script to run the synthetic data-generation pipeline.
 Saves the generated datasets to CSV files and outputs basic statistics.
 """
 
