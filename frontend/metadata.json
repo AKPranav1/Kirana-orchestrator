@@ -1,0 +1,6 @@
+{
+  "name": "Kirana AI",
+  "description": "Production-quality, high-fidelity autonomous SaaS operating system designed for Indian retail shopkeepers.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
