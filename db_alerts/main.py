@@ -108,35 +108,44 @@ async def log_endpoint(req: LogRequest):
     raw_payload = req.order
     
     # ── THE ADAPTER: Convert Person 2's messy nested JSON into Person 3's clean format ──
-    clean_order = {
-        "customer_name": "Unknown",
-        "customer_phone": raw_payload.get("customer_phone", req.shopkeeper_phone),
-        "language": raw_payload.get("language", "hi"),
-        "payment_mode": raw_payload.get("payment_mode", "cash"),
-        "items": [],
-        "split_with": []
-    }
-
-    # Handle Person 2's deeply nested 'processed_splits' array
-    if "processed_splits" in raw_payload and len(raw_payload["processed_splits"]) > 0:
-        main_split = raw_payload["processed_splits"][0]
-        clean_order["customer_name"] = main_split.get("buyer_name", "Unknown")
-        
-        for item in main_split.get("items", []):
-            clean_order["items"].append({
-                "name": item.get("item_name", "item"),
-                "qty": item.get("quantity", 1)
-            })
-            
-        # Extra buyers go into split_with
-        if len(raw_payload["processed_splits"]) > 1:
-            for extra_split in raw_payload["processed_splits"][1:]:
-                clean_order["split_with"].append(extra_split.get("buyer_name", "Unknown"))
+    # Fast-path: if ingestion already sent a flat order (has customer_name and items), accept it as-is.
+    if isinstance(raw_payload, dict) and "customer_name" in raw_payload and "items" in raw_payload:
+        clean_order = raw_payload
+        # ensure minimal fields exist
+        clean_order.setdefault("customer_phone", req.shopkeeper_phone)
+        clean_order.setdefault("language", "hi")
+        clean_order.setdefault("payment_mode", "cash")
+        clean_order.setdefault("split_with", [])
     else:
-        # Fallback just in case Person 2 actually sends the correct flat JSON format
-        clean_order["customer_name"] = raw_payload.get("customer_name", "Unknown")
-        clean_order["items"] = raw_payload.get("items", [])
-        clean_order["split_with"] = raw_payload.get("split_with", [])
+        clean_order = {
+            "customer_name": "Unknown",
+            "customer_phone": raw_payload.get("customer_phone", req.shopkeeper_phone),
+            "language": raw_payload.get("language", "hi"),
+            "payment_mode": raw_payload.get("payment_mode", "cash"),
+            "items": [],
+            "split_with": []
+        }
+
+        # Handle Person 2's deeply nested 'processed_splits' array
+        if "processed_splits" in raw_payload and len(raw_payload["processed_splits"]) > 0:
+            main_split = raw_payload["processed_splits"][0]
+            clean_order["customer_name"] = main_split.get("buyer_name", "Unknown")
+            
+            for item in main_split.get("items", []):
+                clean_order["items"].append({
+                    "name": item.get("item_name", "item"),
+                    "qty": item.get("quantity", 1)
+                })
+                
+            # Extra buyers go into split_with
+            if len(raw_payload["processed_splits"]) > 1:
+                for extra_split in raw_payload["processed_splits"][1:]:
+                    clean_order["split_with"].append(extra_split.get("buyer_name", "Unknown"))
+        else:
+            # Fallback just in case Person 2 actually sends the correct flat JSON format
+            clean_order["customer_name"] = raw_payload.get("customer_name", "Unknown")
+            clean_order["items"] = raw_payload.get("items", [])
+            clean_order["split_with"] = raw_payload.get("split_with", [])
 
     print(f"\n[/log] 📥 Adapted Order for DB: {clean_order}")
     print(f"[/log]    Mode={clean_order['payment_mode']} | Lang={clean_order['language']}")
@@ -244,7 +253,10 @@ def list_orders(limit: int = 20):
     cursor = db["orders"].find({}, {"_id": 0}).sort("created_at", -1).limit(limit)
     docs   = []
     for d in cursor:
+        # Normalize field names for frontend compatibility: 'order_id' -> 'id'
         d["created_at"] = str(d.get("created_at", ""))
+        if "order_id" in d:
+            d["id"] = d.pop("order_id")
         docs.append(d)
     return {"count": len(docs), "orders": docs}
 
@@ -335,6 +347,36 @@ def dashboard_metrics():
         "pendingSupplierPay":    round(pending_supplier_pay, 2),
         "storeHealthScore":      94,
     }
+
+
+# ── Read: Flattened Khata Transactions (new) ───────────────────────────────────
+@app.get("/khata", tags=["read"])
+def list_khata_transactions(store_id: str = "store_001"):
+    """Return a flattened list of khata transactions across all customers for the dashboard/client.
+    Each khata document stores an `entries` array — this endpoint normalizes them to individual
+    transaction objects so the frontend can display a chronological ledger stream.
+    """
+    db = get_db()
+    txns = []
+    cursor = db["khata"].find({"store_id": store_id}, {"_id": 0, "customer_name": 1, "entries": 1})
+    for doc in cursor:
+        customer_name = doc.get("customer_name")
+        for idx, e in enumerate(doc.get("entries", [])):
+            txns.append({
+                "id": f"{customer_name}-{e.get('order_id')}-{idx}",
+                "customerId": customer_name,  # note: customerName used as id here for compatibility
+                "customerName": customer_name,
+                "type": "credit",
+                "amount": e.get("amount", 0),
+                "date": e.get("date"),
+                "description": f"Order {e.get('order_id')}",
+            })
+    # sort by date descending
+    try:
+        txns.sort(key=lambda x: x.get("date") or "", reverse=True)
+    except Exception:
+        pass
+    return {"count": len(txns), "transactions": txns}
 
 
 # ── ML: Forecasts ──────────────────────────────────────────────────────────────
