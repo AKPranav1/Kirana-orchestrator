@@ -5,11 +5,12 @@
 
 import { Forecast } from '../types';
 import { mockForecasts } from '../data/forecast';
+import { DB_ALERTS_FORECAST } from '../config';
 
 export const forecastService = {
   getForecasts: async (): Promise<Forecast[]> => {
     try {
-      const res = await fetch('http://localhost:8002/forecast');
+      const res = await fetch(DB_ALERTS_FORECAST);
       if (!res.ok) throw new Error(`forecast ${res.status}`);
       const json = await res.json();
       return json as Forecast[];

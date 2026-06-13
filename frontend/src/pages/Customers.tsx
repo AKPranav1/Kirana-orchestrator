@@ -31,7 +31,14 @@ export default function Customers() {
   const loadCustomers = async () => {
     setLoading(true);
     const list = await customersService.getCustomers();
-    setCustomers(list);
+
+    setCustomers(
+      list.map((c: any) => ({
+        ...c,
+        name: c.name || c.customer_name || "Unknown Customer",
+        phone: c.phone || "",
+      }))
+    );
     setLoading(false);
   };
 
@@ -77,9 +84,9 @@ export default function Customers() {
     }
   };
 
-  const filteredCustomers = customers.filter(c => 
-    c.name.toLowerCase().includes(search.toLowerCase()) || 
-    c.phone.includes(search)
+  const filteredCustomers = customers.filter(c =>
+    (c.name ?? "").toLowerCase().includes(search.toLowerCase()) ||
+    (c.phone ?? "").includes(search)
   );
 
   return (
@@ -161,7 +168,7 @@ export default function Customers() {
       {/* Customers Cards list */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {filteredCustomers.map(c => {
-          const isOverdue = c.khataBalance < -1000 || c.status === 'Overdue';
+          const isOverdue = (c.khataBalance ?? 0) < -1000 || c.status === 'Overdue';
           const isFrequent = c.status === 'Frequent';
 
           return (
@@ -179,10 +186,12 @@ export default function Customers() {
               <div className="flex justify-between items-start mb-4">
                 <div className="flex items-center gap-3">
                   <div className="w-9 h-9 rounded-full bg-[#1C1B1B] border border-[#1F1F1F] flex items-center justify-center text-white font-semibold text-sm">
-                    {c.name.charAt(0)}
+                    {(c.name ?? "?").charAt(0)}
                   </div>
                   <div>
-                    <h4 className="text-xs font-bold text-white">{c.name}</h4>
+                    <h4 className="text-xs font-bold text-white">
+                      {c.name ?? (c as any).customer_name ?? "Unknown Customer"}
+                    </h4>
                     <p className="text-[10px] text-[#888888] mt-0.5">{c.phone}</p>
                   </div>
                 </div>
@@ -206,20 +215,22 @@ export default function Customers() {
                 }`}>
                   <p className="text-[9px] text-[#888888] uppercase font-bold tracking-wider">Khata Balance</p>
                   <p className={`font-semibold font-mono text-xs mt-1 ${
-                    c.khataBalance < 0 ? 'text-red-400' : c.khataBalance > 0 ? 'text-[#4edea3]' : 'text-gray-400'
+                    (c.khataBalance ?? 0) < 0 ? 'text-red-400' :(c.khataBalance ?? 0) > 0 ? 'text-[#4edea3]' : 'text-gray-400'
                   }`}>
-                    ₹ {c.khataBalance.toLocaleString('en-IN')}
+                    ₹ {(c.khataBalance ?? 0).toLocaleString('en-IN')}
                   </p>
                 </div>
 
                 <div className="bg-[#0F0F0F] border border-[#1F1F1F] p-2.5 rounded-sm">
                   <p className="text-[9px] text-[#888888] uppercase font-bold tracking-wider">Avg Basket</p>
-                  <p className="font-semibold text-white font-mono text-xs mt-1">₹ {c.avgBasket}</p>
+                  <p className="font-semibold text-white font-mono text-xs mt-1">
+                    {`₹ ${c.avgBasket ?? 0}`}
+                  </p>
                 </div>
 
                 <div className="col-span-2 bg-[#0F0F0F] border border-[#1F1F1F] p-2.5 rounded-sm flex justify-between items-center text-xs">
                   <p className="text-[9px] text-[#888888] uppercase font-bold tracking-wider">LIFETIME REVENUE</p>
-                  <p className="font-semibold text-white font-mono">₹ {c.lifetimeSpend.toLocaleString('en-IN')}</p>
+                  <p className="font-semibold text-white font-mono">₹ {(c.lifetimeSpend ?? 0).toLocaleString('en-IN')}</p>
                 </div>
               </div>
 
@@ -227,7 +238,9 @@ export default function Customers() {
               <div className="flex gap-2">
                 <button 
                   onClick={() => {
-                    const message = `Namaste ${c.name}, this is Suresh Sharma's Kirana store. Kindly settle your outstanding Khata balance of ₹${Math.abs(c.khataBalance)}. Thank you!`;
+                    const customerName = c.name || "Customer";
+                    const message = `Namaste ${customerName}, this is Suresh Sharma's Kirana store. Kindly settle your outstanding Khata balance of ₹${Math.abs(c.khataBalance ?? 0)}. Thank you!`;
+
                     navigator.clipboard.writeText(message);
                     alert("WhatsApp notification templates copied to your clipboard!");
                   }}
@@ -259,7 +272,9 @@ export default function Customers() {
             </div>
 
             <p className="text-xs text-[#888888]">
-              Recording a payment reduces <b className="text-white">{settleCustomer.name}</b>'s open credit balance of ₹{Math.abs(settleCustomer.khataBalance)}.
+              Recording a payment reduces <b className="text-white">
+                {settleCustomer.name ?? (settleCustomer as any).customer_name ?? "Customer"}
+              </b>'s open credit balance of ₹{Math.abs(settleCustomer.khataBalance)}.
             </p>
 
             <div className="space-y-3 text-xs">

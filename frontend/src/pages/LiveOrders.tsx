@@ -25,8 +25,61 @@ export default function LiveOrders({ onOpenNewOrder }: LiveOrdersProps) {
 
   const loadOrders = async () => {
     setLoading(true);
+
     const list = await ordersService.getOrders();
-    setOrders(list);
+
+    setOrders(
+      list.map((o: any) => ({
+        ...o,
+
+        // Basic fields
+        id: String(o.id ?? o.order_id ?? ""),
+        customerName:
+          o.customerName ??
+          o.customer_name ??
+          o.customer ??
+          "Unknown Customer",
+
+        source:
+          o.source ??
+          o.channel ??
+          "WhatsApp",
+
+        status:
+          o.status ??
+          "Pending",
+
+        totalAmount:
+          o.totalAmount ??
+          o.total_amount ??
+          o.bill_amount ??
+          0,
+
+        createdAt:
+          o.createdAt ??
+          o.created_at ??
+          new Date().toISOString(),
+
+        // Normalize items
+        items: (o.items ?? []).map((i: any) => ({
+          productName:
+            i.productName ??
+            i.name ??
+            "Unknown Item",
+
+          quantity:
+            i.quantity ??
+            i.qty ??
+            1,
+
+          price:
+            i.price ??
+            i.unit_price ??
+            0,
+        })),
+      }))
+    );
+
     setLoading(false);
   };
 
@@ -45,8 +98,8 @@ export default function LiveOrders({ onOpenNewOrder }: LiveOrdersProps) {
 
   const filteredOrders = orders.filter(o => {
     const matchesFilter = filter === 'All' || o.status === filter;
-    const matchesSearch = o.customerName.toLowerCase().includes(search.toLowerCase()) || 
-                          o.id.toLowerCase().includes(search.toLowerCase());
+    const matchesSearch = (o.customerName ?? "").toLowerCase().includes(search.toLowerCase()) || 
+                          String(o.id ?? "").toLowerCase().includes(search.toLowerCase());
     return matchesFilter && matchesSearch;
   });
 
@@ -130,7 +183,7 @@ export default function LiveOrders({ onOpenNewOrder }: LiveOrdersProps) {
                     >
                       <td className="p-4">
                         <div className="font-semibold text-white">Order #{o.id}</div>
-                        <div className="text-[10px] text-[#888888] mt-0.5">{o.customerName}</div>
+                        <div className="text-[10px] text-[#888888] mt-0.5">{o.customerName ?? "Unknown Customer"}</div>
                       </td>
                       <td className="p-4">
                         <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-sm text-[10px] font-semibold ${
@@ -143,7 +196,7 @@ export default function LiveOrders({ onOpenNewOrder }: LiveOrdersProps) {
                         </span>
                       </td>
                       <td className="p-4 text-[#888888] max-w-xs truncate">
-                        {o.items.map(i => `${i.quantity}x ${i.productName}`).join(', ')}
+                        {(o.items ?? []).map(i => `${i.quantity}x ${i.productName}`).join(', ')}
                       </td>
                       <td className="p-4 text-right font-semibold text-white font-mono">
                         ₹{o.totalAmount}
@@ -194,7 +247,7 @@ export default function LiveOrders({ onOpenNewOrder }: LiveOrdersProps) {
               {/* Items List */}
               <div className="border-t border-b border-[#1F1F1F] py-3 my-2 space-y-1.5">
                 <span className="text-[10px] font-semibold text-[#888888] uppercase tracking-wider block">Line Items</span>
-                {activeOrder.items.map((i, idx) => (
+                {(activeOrder.items ?? []).map((i, idx) => (
                   <div key={idx} className="flex justify-between items-center text-xs">
                     <span className="text-[#888888]">{i.productName} <b className="text-white">x{i.quantity}</b></span>
                     <span className="font-mono text-white">₹{i.price * i.quantity}</span>
