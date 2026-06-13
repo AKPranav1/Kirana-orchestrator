@@ -18,7 +18,9 @@ class ParsedOrderPayload(BaseModel):
     payment_intent: str = Field(..., description="Must return 'khata' if terms like tab, udhaar, account, credit, or 'khate me likho' are caught. Otherwise default to 'cash' or 'upi'.")
     request_pdf: bool = Field(False, description="Set to True ONLY if the customer explicitly requests a written statement, bill file, document, or historical statement.")
     raw_splits: List[BuyerSplit] = Field(default_factory=list)
-
+    
+    # 👇 Added 'te' for Telugu right here
+    language: str = Field("hi", description="The 2-letter language code of the input (e.g., 'en' for English, 'hi' for Hindi/Hinglish, 'kn' for Kannada, 'te' for Telugu). Default to 'hi'.")
 
 # =====================================================================
 # LAYER 2: SYSTEM ORDINANCE SCHEMA (What your Python API outputs)
@@ -53,4 +55,5 @@ class FinalOrderManifest(BaseModel):
     whatsapp_notifications: List[WhatsAppNotification]
     status: str = "pending"
     error: bool = False
-    debug: Optional[Any] = None    
+    debug: Optional[Any] = None
+    language: str = "hi"   

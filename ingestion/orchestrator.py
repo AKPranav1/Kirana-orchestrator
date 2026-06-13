@@ -66,5 +66,6 @@ def orchestrate_order_processing(parsed_data: ParsedOrderPayload, input_meta: di
         pdf_requested=parsed_data.request_pdf,
         processed_splits=processed_splits_list,
         whatsapp_notifications=whatsapp_notifications_list,
-        status="processed"
+        status="processed",
+        language=parsed_data.language
     )
