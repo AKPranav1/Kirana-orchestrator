@@ -108,6 +108,7 @@ async def process(req: ProcessRequest):
             "customer_phone": final_manifest.customer_phone,
             "customer_name":  first_split.buyer_name if first_split else "Unknown",
             "store_id":       "store_001",
+            "language":       final_manifest.language,
             "items": [
                 {
                     "name":       item.item_name,
