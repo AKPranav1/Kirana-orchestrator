@@ -19,7 +19,7 @@ from pydantic import BaseModel
 from dotenv import load_dotenv
 
 from mongo_connector import (
-    log_order           as db_log_order,
+    log_order as db_log_order,
     get_khata_balance,
     increment_reminder_count,
     get_db,
@@ -29,7 +29,7 @@ from alerts import send_receipt_only, send_vasooli_alert, create_text_bill
 load_dotenv()
 
 # ── Constants ──────────────────────────────────────────────────────────────────
-AUDIO_DIR         = Path(__file__).parent / "audio_files"
+AUDIO_DIR = Path(__file__).parent / "audio_files"
 AUDIO_DIR.mkdir(exist_ok=True)
 
 DEBT_WARNING_LIMIT = 1500.0
@@ -46,7 +46,7 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],   # tighten to your Vite origin in production
+    allow_origins=["*"],  # tighten to your Vite origin in production
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -66,20 +66,43 @@ if MODEL_FILE.exists():
     except Exception as e:
         print(f"[forecast] ⚠️ Failed to load forecasts payload: {e}")
 else:
-    print("[forecast] ℹ️ model_forecasts.pkl not found — /forecast will return 503 until trained")
+    print(
+        "[forecast] ℹ️ model_forecasts.pkl not found — /forecast will return 503 until trained"
+    )
 
 
 # ── Request models ─────────────────────────────────────────────────────────────
 class LogRequest(BaseModel):
-    order:            dict
+    order: dict
     shopkeeper_phone: str
 
 
-class VasooliRequest(BaseModel):
-    customer_name:  str
+# Light FlatOrder model to validate incoming payloads from ingestion
+class FlatItem(BaseModel):
+    name: str
+    qty: float
+    unit: str | None = None
+    unit_price: float | None = None
+
+
+class FlatOrder(BaseModel):
     customer_phone: str
-    store_id:       str = "store_001"
-    language:       str = "hi"   # Sarvam language code: hi / kn / en / ta / te
+    customer_name: str
+    store_id: str
+    language: str = "hi"
+    items: list[FlatItem]
+    split_with: list[str] = []
+    payment_mode: str = "cash"
+    input_type: str | None = None
+    raw_input_url: str | None = None
+    total_amount: float | None = None
+
+
+class VasooliRequest(BaseModel):
+    customer_name: str
+    customer_phone: str
+    store_id: str = "store_001"
+    language: str = "hi"  # Sarvam language code: hi / kn / en / ta / te
 
 
 # ── Health ─────────────────────────────────────────────────────────────────────
@@ -92,7 +115,7 @@ def health_check():
 def ping_mongo():
     """Verify MongoDB Atlas connectivity before the demo."""
     try:
-        db   = get_db()
+        db = get_db()
         info = db.client.server_info()
         return {"status": "ok", "mongo_version": info.get("version")}
     except Exception as e:
@@ -105,17 +128,33 @@ async def log_endpoint(req: LogRequest):
     """
     Called by Person 1's webhook router after an order arrives.
     """
-    raw_payload = req.order
-    
-    # ── THE ADAPTER: Convert Person 2's messy nested JSON into Person 3's clean format ──
-    # Fast-path: if ingestion already sent a flat order (has customer_name and items), accept it as-is.
-    if isinstance(raw_payload, dict) and "customer_name" in raw_payload and "items" in raw_payload:
-        clean_order = raw_payload
-        # ensure minimal fields exist
+    raw_payload = req.order or {}
+    if not isinstance(raw_payload, dict):
+        print("[/log] ⚠️ Received non-dict payload; coercing to empty dict for safety")
+        raw_payload = {}
+
+    # Try lightweight validation against FlatOrder model if ingestion sent a compatible payload
+    clean_order = None
+    try:
+        candidate = FlatOrder.model_validate(req.order)
+        clean_order = candidate.model_dump()
+        # Ensure shopkeeper fallback
         clean_order.setdefault("customer_phone", req.shopkeeper_phone)
-        clean_order.setdefault("language", "hi")
-        clean_order.setdefault("payment_mode", "cash")
-        clean_order.setdefault("split_with", [])
+    except Exception:
+        # fallback to existing adapter behavior
+        # ── THE ADAPTER: Convert Person 2's messy nested JSON into Person 3's clean format ──
+        # Fast-path: if ingestion already sent a flat order (has customer_name and items), accept it as-is.
+        if (
+            isinstance(raw_payload, dict)
+            and "customer_name" in raw_payload
+            and "items" in raw_payload
+        ):
+            clean_order = raw_payload
+            # ensure minimal fields exist
+            clean_order.setdefault("customer_phone", req.shopkeeper_phone)
+            clean_order.setdefault("language", "hi")
+            clean_order.setdefault("payment_mode", "cash")
+            clean_order.setdefault("split_with", [])
     else:
         clean_order = {
             "customer_name": "Unknown",
@@ -123,24 +162,31 @@ async def log_endpoint(req: LogRequest):
             "language": raw_payload.get("language", "hi"),
             "payment_mode": raw_payload.get("payment_mode", "cash"),
             "items": [],
-            "split_with": []
+            "split_with": [],
         }
 
         # Handle Person 2's deeply nested 'processed_splits' array
-        if "processed_splits" in raw_payload and len(raw_payload["processed_splits"]) > 0:
+        if (
+            "processed_splits" in raw_payload
+            and len(raw_payload["processed_splits"]) > 0
+        ):
             main_split = raw_payload["processed_splits"][0]
             clean_order["customer_name"] = main_split.get("buyer_name", "Unknown")
-            
+
             for item in main_split.get("items", []):
-                clean_order["items"].append({
-                    "name": item.get("item_name", "item"),
-                    "qty": item.get("quantity", 1)
-                })
-                
+                clean_order["items"].append(
+                    {
+                        "name": item.get("item_name", "item"),
+                        "qty": item.get("quantity", 1),
+                    }
+                )
+
             # Extra buyers go into split_with
             if len(raw_payload["processed_splits"]) > 1:
                 for extra_split in raw_payload["processed_splits"][1:]:
-                    clean_order["split_with"].append(extra_split.get("buyer_name", "Unknown"))
+                    clean_order["split_with"].append(
+                        extra_split.get("buyer_name", "Unknown")
+                    )
         else:
             # Fallback just in case Person 2 actually sends the correct flat JSON format
             clean_order["customer_name"] = raw_payload.get("customer_name", "Unknown")
@@ -148,13 +194,17 @@ async def log_endpoint(req: LogRequest):
             clean_order["split_with"] = raw_payload.get("split_with", [])
 
     print(f"\n[/log] 📥 Adapted Order for DB: {clean_order}")
-    print(f"[/log]    Mode={clean_order['payment_mode']} | Lang={clean_order['language']}")
+    print(
+        f"[/log]    Mode={clean_order['payment_mode']} | Lang={clean_order['language']}"
+    )
     # ───────────────────────────────────────────────────────────────────────────────────
 
     try:
         # Step 1: MongoDB (critical — must succeed before anything else)
         # PASS 'clean_order', NOT 'req.order'
-        order_id, order_doc, highest_debt = db_log_order(clean_order, req.shopkeeper_phone)
+        order_id, order_doc, highest_debt = db_log_order(
+            clean_order, req.shopkeeper_phone
+        )
 
         alert_status = "success"
 
@@ -168,35 +218,44 @@ async def log_endpoint(req: LogRequest):
                 and highest_debt > DEBT_WARNING_LIMIT
             ):
                 customer_phone = order_doc.get("customer_phone", "")
-                phone_digits   = "".join(c for c in customer_phone if c.isdigit())
+                phone_digits = "".join(c for c in customer_phone if c.isdigit())
 
                 if len(phone_digits) >= 10:
-                    lang  = order_doc.get("language", "hi")
-                    name  = order_doc["customer_name"]
+                    lang = order_doc.get("language", "hi")
+                    name = order_doc["customer_name"]
                     count = increment_reminder_count(name, order_doc["store_id"])
 
-                    print(f"[/log] 🚨 Auto-Vasooli L{count} → {name} | debt=₹{highest_debt}")
+                    print(
+                        f"[/log] 🚨 Auto-Vasooli L{count} → {name} | debt=₹{highest_debt}"
+                    )
                     send_vasooli_alert(name, customer_phone, highest_debt, count, lang)
                     alert_status = "text_receipt_and_auto_vasooli_sent"
                 else:
-                    print(f"[/log] ⚠️ Debt ₹{highest_debt} > limit but no valid phone for {order_doc['customer_name']} — Vasooli skipped")
+                    print(
+                        f"[/log] ⚠️ Debt ₹{highest_debt} > limit but no valid phone for {order_doc['customer_name']} — Vasooli skipped"
+                    )
                     alert_status = "vasooli_skipped_no_phone"
 
         except Exception as api_err:
             print(f"[/log] ⚠️ DB OK but alert API error: {api_err}")
             alert_status = f"api_failed: {api_err}"
 
-        print(f"[/log] ✅ order_id={order_id} | total=₹{order_doc.get('total_amount')} | {alert_status}\n")
+        print(
+            f"[/log] ✅ order_id={order_id} | total=₹{order_doc.get('total_amount')} | {alert_status}\n"
+        )
 
         response_order = dict(order_doc)
         response_order["created_at"] = str(response_order.get("created_at", ""))
 
-        return JSONResponse(status_code=200, content={
-            "status":       "success",
-            "alert_status": alert_status,
-            "order_id":     order_id,
-            "order":        response_order,
-        })
+        return JSONResponse(
+            status_code=200,
+            content={
+                "status": "success",
+                "alert_status": alert_status,
+                "order_id": order_id,
+                "order": response_order,
+            },
+        )
 
     except Exception as e:
         print(f"[/log] ❌ CRITICAL DB ERROR: {e}\n")
@@ -212,35 +271,48 @@ async def vasooli_endpoint(req: VasooliRequest):
     """
     phone_digits = "".join(c for c in req.customer_phone if c.isdigit())
     if len(phone_digits) < 10:
-        return JSONResponse(status_code=400, content={
-            "status":  "error",
-            "message": f"Valid 10-digit phone required for {req.customer_name}. Cannot send Vasooli.",
-        })
+        return JSONResponse(
+            status_code=400,
+            content={
+                "status": "error",
+                "message": f"Valid 10-digit phone required for {req.customer_name}. Cannot send Vasooli.",
+            },
+        )
 
     khata_doc = get_khata_balance(req.customer_name, req.store_id)
     if not khata_doc:
-        raise HTTPException(status_code=404, detail=f"No khata found for {req.customer_name}")
+        raise HTTPException(
+            status_code=404, detail=f"No khata found for {req.customer_name}"
+        )
 
     outstanding = khata_doc.get("total_outstanding", 0)
     if outstanding <= 0:
-        return JSONResponse(status_code=200, content={
-            "status":  "no_dues",
-            "message": f"{req.customer_name} has cleared their balance. 🎉",
-        })
+        return JSONResponse(
+            status_code=200,
+            content={
+                "status": "no_dues",
+                "message": f"{req.customer_name} has cleared their balance. 🎉",
+            },
+        )
 
     count = increment_reminder_count(req.customer_name, req.store_id)
-    print(f"[/vasooli] 📤 Manual Level {count} reminder → {req.customer_name} (₹{outstanding})")
+    print(
+        f"[/vasooli] 📤 Manual Level {count} reminder → {req.customer_name} (₹{outstanding})"
+    )
 
     try:
         audio = send_vasooli_alert(
             req.customer_name, req.customer_phone, outstanding, count, req.language
         )
-        return JSONResponse(status_code=200, content={
-            "status":           "success",
-            "escalation_level": count,
-            "outstanding":      outstanding,
-            "audio_file":       audio,
-        })
+        return JSONResponse(
+            status_code=200,
+            content={
+                "status": "success",
+                "escalation_level": count,
+                "outstanding": outstanding,
+                "audio_file": audio,
+            },
+        )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -249,9 +321,9 @@ async def vasooli_endpoint(req: VasooliRequest):
 @app.get("/orders", tags=["read"])
 def list_orders(limit: int = 20):
     """Most recent N orders — used by the React LiveOrders page."""
-    db     = get_db()
+    db = get_db()
     cursor = db["orders"].find({}, {"_id": 0}).sort("created_at", -1).limit(limit)
-    docs   = []
+    docs = []
     for d in cursor:
         # Normalize field names for frontend compatibility: 'order_id' -> 'id'
         d["created_at"] = str(d.get("created_at", ""))
@@ -263,7 +335,7 @@ def list_orders(limit: int = 20):
 
 @app.get("/orders/{order_id}/receipt", tags=["read"])
 def get_receipt(order_id: str):
-    db  = get_db()
+    db = get_db()
     doc = db["orders"].find_one({"order_id": order_id}, {"_id": 0})
     if not doc:
         raise HTTPException(status_code=404, detail=f"Order {order_id} not found")
@@ -289,7 +361,7 @@ def get_khata(customer_name: str, store_id: str = "store_001"):
 @app.get("/customers/leaderboard", tags=["read"])
 def get_loyalty_leaderboard(limit: int = 10, store_id: str = "store_001"):
     """Top customers by lifetime spend — used by the React Customers page."""
-    db     = get_db()
+    db = get_db()
     cursor = (
         db["customers"]
         .find({"store_id": store_id}, {"_id": 0})
@@ -310,14 +382,14 @@ def dashboard_metrics():
     Derived aggregates for the React Dashboard page.
     Uses get_db() (the public alias) — no internal _get_db import needed.
     """
-    db        = get_db()
-    today     = datetime.now(timezone.utc).date()
+    db = get_db()
+    today = datetime.now(timezone.utc).date()
     day_start = datetime.combine(today, time.min).replace(tzinfo=timezone.utc)
 
     todays_orders = list(
         db["orders"].find({"created_at": {"$gte": day_start}}, {"total_amount": 1})
     )
-    todays_revenue      = sum(o.get("total_amount", 0) for o in todays_orders)
+    todays_revenue = sum(o.get("total_amount", 0) for o in todays_orders)
     todays_orders_count = len(todays_orders)
 
     outstanding_khata = sum(
@@ -327,25 +399,35 @@ def dashboard_metrics():
 
     collections = db.list_collection_names()
 
-    low_stock_count = db["products"].count_documents({"stock_quantity": {"$lt": 5}}) \
-        if "products" in collections else 0
+    low_stock_count = (
+        db["products"].count_documents({"stock_quantity": {"$lt": 5}})
+        if "products" in collections
+        else 0
+    )
 
-    pending_deliveries = db["purchase_orders"].count_documents({"status": "In Transit"}) \
-        if "purchase_orders" in collections else 0
+    pending_deliveries = (
+        db["purchase_orders"].count_documents({"status": "In Transit"})
+        if "purchase_orders" in collections
+        else 0
+    )
 
-    pending_supplier_pay = sum(
-        s.get("outstanding_balance", 0)
-        for s in db["suppliers"].find({}, {"outstanding_balance": 1})
-    ) if "suppliers" in collections else 0
+    pending_supplier_pay = (
+        sum(
+            s.get("outstanding_balance", 0)
+            for s in db["suppliers"].find({}, {"outstanding_balance": 1})
+        )
+        if "suppliers" in collections
+        else 0
+    )
 
     return {
-        "todaysRevenue":         round(todays_revenue, 2),
-        "todaysOrdersCount":     todays_orders_count,
-        "outstandingKhata":      round(outstanding_khata, 2),
-        "lowStockItemsCount":    low_stock_count,
+        "todaysRevenue": round(todays_revenue, 2),
+        "todaysOrdersCount": todays_orders_count,
+        "outstandingKhata": round(outstanding_khata, 2),
+        "lowStockItemsCount": low_stock_count,
         "pendingDeliveriesCount": pending_deliveries,
-        "pendingSupplierPay":    round(pending_supplier_pay, 2),
-        "storeHealthScore":      94,
+        "pendingSupplierPay": round(pending_supplier_pay, 2),
+        "storeHealthScore": 94,
     }
 
 
@@ -358,19 +440,23 @@ def list_khata_transactions(store_id: str = "store_001"):
     """
     db = get_db()
     txns = []
-    cursor = db["khata"].find({"store_id": store_id}, {"_id": 0, "customer_name": 1, "entries": 1})
+    cursor = db["khata"].find(
+        {"store_id": store_id}, {"_id": 0, "customer_name": 1, "entries": 1}
+    )
     for doc in cursor:
         customer_name = doc.get("customer_name")
         for idx, e in enumerate(doc.get("entries", [])):
-            txns.append({
-                "id": f"{customer_name}-{e.get('order_id')}-{idx}",
-                "customerId": customer_name,  # note: customerName used as id here for compatibility
-                "customerName": customer_name,
-                "type": "credit",
-                "amount": e.get("amount", 0),
-                "date": e.get("date"),
-                "description": f"Order {e.get('order_id')}",
-            })
+            txns.append(
+                {
+                    "id": f"{customer_name}-{e.get('order_id')}-{idx}",
+                    "customerId": customer_name,  # note: customerName used as id here for compatibility
+                    "customerName": customer_name,
+                    "type": "credit",
+                    "amount": e.get("amount", 0),
+                    "date": e.get("date"),
+                    "description": f"Order {e.get('order_id')}",
+                }
+            )
     # sort by date descending
     try:
         txns.sort(key=lambda x: x.get("date") or "", reverse=True)

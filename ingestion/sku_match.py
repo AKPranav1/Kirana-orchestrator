@@ -1,7 +1,16 @@
 import json
-from rapidfuzz import process, fuzz
 from typing import Tuple, Optional
 from pathlib import Path
+
+# rapidfuzz is an optional dependency for better fuzzy matching in production.
+# Provide a lightweight fallback when it's not available in the runtime environment.
+try:
+    from rapidfuzz import process, fuzz
+
+    _HAS_RAPIDFUZZ = True
+except Exception:
+    _HAS_RAPIDFUZZ = False
+
 
 class SKUMatcher:
     def __init__(self, catalog_path: str):
@@ -23,11 +32,21 @@ class SKUMatcher:
             canon, unit = self.aliases[key]
             return canon, unit, 100.0
 
-        match = process.extractOne(key, self.alias_list, scorer=fuzz.WRatio)
-        if match:
-            candidate, score, _ = match
-            if score >= cutoff:
-                canon, unit = self.aliases[candidate]
-                return canon, unit, float(score)
+        if _HAS_RAPIDFUZZ:
+            match = process.extractOne(key, self.alias_list, scorer=fuzz.WRatio)
+            if match:
+                candidate, score, _ = match
+                if score >= cutoff:
+                    canon, unit = self.aliases[candidate]
+                    return canon, unit, float(score)
+        else:
+            # Simple fallback: prefix/substring match with a modest score
+            for candidate in self.alias_list:
+                if key == candidate:
+                    canon, unit = self.aliases[candidate]
+                    return canon, unit, 100.0
+                if key in candidate or candidate in key:
+                    canon, unit = self.aliases[candidate]
+                    return canon, unit, 75.0
 
         return name, None, 0.0
