@@ -15,7 +15,9 @@ export const ordersService = {
         const json = await res.json();
         return json.orders || [];
       } catch (e) {
-        return [];
+        // If backend is down, fall back to persisted orders in localStorage so UI remains usable
+        const stored = JSON.parse(localStorage.getItem('ka_orders') || '[]') as Order[];
+        return stored;
       }
     })();
   },

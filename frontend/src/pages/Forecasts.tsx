@@ -30,12 +30,25 @@ export default function Forecasts() {
     setProcureSuccessId(null);
     try {
       // Create draft Purchase Order
+      // Prefer canonicalProductId if provided by the ML payload. Otherwise attempt to find a product in localStorage matching product_name.
+      let prodId = (forecast as any).canonicalProductId || null;
+      if (!prodId) {
+        try {
+          const prods = JSON.parse(localStorage.getItem('ka_products') || '[]') as any[];
+          const matched = prods.find(p => p.name.toLowerCase().includes(forecast.product_name.toLowerCase()) || forecast.product_name.toLowerCase().includes(p.name.toLowerCase()));
+          if (matched) prodId = matched.id;
+        } catch (e) {
+          prodId = null;
+        }
+      }
+      const usedProductId = prodId || forecast.productId;
+
       await suppliersService.createPurchaseOrder({
         supplierId: "sup-1", // Hind Unilever default
         supplierName: "Hindustan Unilever",
         items: [
           {
-            productId: forecast.productId,
+            productId: usedProductId,
             productName: forecast.product_name,
             quantity: forecast.recommended_reorder_quantity,
             costPrice: 210.00
