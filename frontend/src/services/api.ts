@@ -82,6 +82,7 @@ const setStored = <T>(key: string, data: T) => {
 const delay = (ms = 400) => new Promise(resolve => setTimeout(resolve, ms));
 
 import { dashboardService } from './dashboard';
+import { INGESTION_PROCESS, DB_ALERTS_BASE, DB_ALERTS_ORDERS, DB_ALERTS_LOG, DB_ALERTS_ORDERS as ORDERS_URL } from '../config';
 
 export const apiClient = {
   // --- DASHBOARD ---
@@ -128,7 +129,7 @@ export const apiClient = {
     await delay(300);
     // Prefer backend when available (demo mode). Fallback to localStorage on error.
     try {
-      const res = await fetch('http://localhost:8002/customers/leaderboard');
+      const res = await fetch(`${DB_ALERTS_BASE}/customers/leaderboard`);
       if (!res.ok) throw new Error('backend error');
       const json = await res.json();
       return json.customers || [];
@@ -159,7 +160,7 @@ export const apiClient = {
     try {
       if (!customerId) {
         // Fetch flattened khata transactions across all customers
-        const res = await fetch('http://localhost:8002/khata');
+        const res = await fetch(`${DB_ALERTS_BASE}/khata`);
         if (!res.ok) throw new Error('backend error');
         const json = await res.json();
         return json.transactions || [];
@@ -167,7 +168,7 @@ export const apiClient = {
 
       // If caller provided a customerId, try backend by customer name first (frontend uses customer id strings like 'cust-1' but backend stores customer_name strings).
       // We'll attempt to find the customer by name via the leaderboard and then request backend khata for that name as a best-effort mapping.
-      const customersRes = await fetch('http://localhost:8002/customers/leaderboard');
+      const customersRes = await fetch(`${DB_ALERTS_BASE}/customers/leaderboard`);
       if (customersRes.ok) {
         const customersJson = await customersRes.json();
         const customers = customersJson.customers || [];
@@ -175,7 +176,7 @@ export const apiClient = {
         if (matched) {
           const name = matched.customer_name || matched.name || matched.customerName;
           if (name) {
-            const res = await fetch(`http://localhost:8002/khata/${encodeURIComponent(name)}`);
+            const res = await fetch(`${DB_ALERTS_BASE}/khata/${encodeURIComponent(name)}`);
             if (res.ok) {
               const json = await res.json();
               // Backend returns full khata ledger; return its entries as transactions
@@ -240,7 +241,7 @@ export const apiClient = {
   getOrders: async (): Promise<Order[]> => {
     // fetch from backend live orders
     try {
-      const res = await fetch('http://localhost:8002/orders');
+      const res = await fetch(DB_ALERTS_ORDERS);
       if (!res.ok) throw new Error('orders fetch failed');
       const json = await res.json();
       return json.orders || [];
@@ -439,7 +440,7 @@ export const apiClient = {
   extractOrderFromWhatsApp: async (textMsg: string): Promise<{ order: Order | null; error?: string }> => {
     // Forward extraction to the ingestion service and persist via db_alerts
     try {
-      const r1 = await fetch('http://localhost:8001/process', {
+      const r1 = await fetch(INGESTION_PROCESS, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ payload_type: 'text', payload: textMsg, customer_phone: 'unknown' }),
@@ -447,7 +448,7 @@ export const apiClient = {
       if (!r1.ok) return { order: null, error: 'Extraction failed' };
       const flatOrder = await r1.json();
 
-      const r2 = await fetch('http://localhost:8002/log', {
+      const r2 = await fetch(DB_ALERTS_LOG, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ order: flatOrder, shopkeeper_phone: 'whatsapp:+919986013436' }),
