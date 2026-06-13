@@ -29,15 +29,15 @@ interface SidebarProps {
 
 export default function Sidebar({ activeTab, setActiveTab, onNewOrder }: SidebarProps) {
   const menuItems = [
-    { id: 'dashboard', name: 'Dashboard', icon: LayoutDashboard },
-    { id: 'orders', name: 'Live Orders', icon: ShoppingCart },
+    { id: 'dashboard', name: 'Home', icon: LayoutDashboard },
+    { id: 'orders', name: 'Incoming Orders', icon: ShoppingCart },
     { id: 'customers', name: 'Customers', icon: Users },
-    { id: 'khata', name: 'Khata Ledger', icon: Wallet },
-    { id: 'inventory', name: 'Product Catalog', icon: Package },
-    { id: 'purchase_orders', name: 'Purchase Orders', icon: ShoppingBag },
-    { id: 'suppliers', name: 'Suppliers', icon: Truck },
-    { id: 'analytics', name: 'Analytics', icon: BarChart3 },
-    { id: 'forecasts', name: 'AI Forecasts', icon: TrendingUp },
+    { id: 'khata', name: 'Credit Book', icon: Wallet },
+    { id: 'inventory', name: 'Products', icon: Package },
+    { id: 'purchase_orders', name: 'Orders to Supplier', icon: ShoppingBag },
+    { id: 'suppliers', name: 'Wholesalers', icon: Truck },
+    { id: 'analytics', name: 'Sales Insights', icon: BarChart3 },
+    { id: 'forecasts', name: 'Stock Suggestions', icon: TrendingUp },
     { id: 'reports', name: 'Reports', icon: FileText },
     { id: 'settings', name: 'Settings', icon: Settings },
   ];
@@ -61,7 +61,7 @@ export default function Sidebar({ activeTab, setActiveTab, onNewOrder }: Sidebar
         className="mx-2 mb-6 bg-white text-[#0A0A0A] font-medium text-sm py-2 px-4 rounded-sm flex items-center justify-center gap-2 hover:bg-[#e2e2e2] active:scale-[0.98] transition-all cursor-pointer"
       >
         <Plus size={16} />
-        New Order
+        + New Sale
       </button>
 
       {/* Navigation List */}

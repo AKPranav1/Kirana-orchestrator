@@ -24,7 +24,7 @@ import { dashboardService } from '../services/dashboard';
 import { ordersService } from '../services/orders';
 import { DashboardMetrics, Order } from '../types';
 import MetricCard from '../components/MetricCard';
-import { mockRecentActivity } from '../data/dashboard';
+// Recent activity will be populated from live events; no local mocks
 
 interface DashboardProps {
   onNavigate: (tab: string) => void;
@@ -34,7 +34,7 @@ interface DashboardProps {
 export default function Dashboard({ onNavigate, onOpenNewOrder }: DashboardProps) {
   const [metrics, setMetrics] = useState<DashboardMetrics | null>(null);
   const [loading, setLoading] = useState(true);
-  const [activities, setActivities] = useState(mockRecentActivity);
+  const [activities, setActivities] = useState<any[]>([]);
   
   // WhatsApp Simulated Parsing states
   const [whatsappText, setWhatsappText] = useState("Aashirvaad Atta 2, Amul Milk 5, Tata Salt 1, please send fast to Rajesh Kumar");
@@ -94,8 +94,8 @@ export default function Dashboard({ onNavigate, onOpenNewOrder }: DashboardProps
       {/* Header and top banner actions */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
-          <h2 className="text-xl font-bold text-white tracking-tight">OS Overview</h2>
-          <p className="text-xs text-[#888888] mt-1">Real-time pulse of your autonomous commerce engine.</p>
+          <h2 className="text-xl font-bold text-white tracking-tight">Shop Summary</h2>
+          <p className="text-xs text-[#888888] mt-1">Live view of sales, stock and alerts.</p>
         </div>
         <div className="flex gap-2">
           <button 
@@ -116,7 +116,7 @@ export default function Dashboard({ onNavigate, onOpenNewOrder }: DashboardProps
       {/* KPI Bento Grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
         <MetricCard 
-          title="Today's Revenue" 
+            title="Today's Sales" 
           value={`₹${metrics?.todaysRevenue?.toLocaleString('en-IN') || '12,450'}`} 
           icon={TrendingUp} 
           iconColor="text-[#10B981]"
@@ -125,14 +125,14 @@ export default function Dashboard({ onNavigate, onOpenNewOrder }: DashboardProps
           loading={loading}
         />
         <MetricCard 
-          title="Today's Orders" 
+            title="Orders Today" 
           value={metrics?.todaysOrdersCount || '42'} 
           icon={ShoppingBag} 
           trend="WhatsApp engine busy"
           loading={loading}
         />
         <MetricCard 
-          title="Outstanding Khata" 
+            title="Credit Outstanding" 
           value={`₹${metrics?.outstandingKhata?.toLocaleString('en-IN') || '8,200'}`} 
           icon={Wallet} 
           iconColor="text-red-400"
@@ -141,7 +141,7 @@ export default function Dashboard({ onNavigate, onOpenNewOrder }: DashboardProps
           loading={loading}
         />
         <MetricCard 
-          title="Low Stock Warning" 
+            title="Low Stock" 
           value={metrics?.lowStockItemsCount ?? 3} 
           icon={AlertTriangle} 
           iconColor="text-red-400"
@@ -149,14 +149,14 @@ export default function Dashboard({ onNavigate, onOpenNewOrder }: DashboardProps
           loading={loading}
         />
         <MetricCard 
-          title="Pending Deliveries" 
+            title="Pending Deliveries" 
           value={metrics?.pendingDeliveriesCount || 5} 
           icon={Truck} 
           trend="3 In Transit"
           loading={loading}
         />
         <MetricCard 
-          title="Pending Supplier Pay" 
+            title="Amount Due to Wholesalers" 
           value={`₹${metrics?.pendingSupplierPay?.toLocaleString('en-IN') || '15,000'}`} 
           icon={CreditCard} 
           trend="Awaiting approval"
@@ -172,17 +172,17 @@ export default function Dashboard({ onNavigate, onOpenNewOrder }: DashboardProps
             <div>
               <div className="flex items-center gap-2.5 mb-3 border-b border-[#1F1F1F] pb-3">
                 <span className="p-1 px-1.5 bg-[#25D366]/10 text-[#25D366] rounded-sm text-xs font-semibold flex items-center gap-1">
-                  <MessageSquare size={14} /> LIVE PIPELINE
+                  <MessageSquare size={14} /> LIVE ORDERS
                 </span>
-                <h3 className="text-sm font-semibold uppercase tracking-wider text-white">WhatsApp Order Extractor (LLM parser)</h3>
+                <h3 className="text-sm font-semibold uppercase tracking-wider text-white">WhatsApp order reader</h3>
               </div>
               <p className="text-xs text-[#888888] mb-4">
-                Kirana AI automatically catches natural text orders via WhatsApp, matches them to catalog products or price structures, and reserves stock instantly. Try it below:
+                Paste a WhatsApp message below and the app will try to make a sale from it.
               </p>
 
               {/* Text area input code */}
               <div className="space-y-3">
-                <label className="block text-[11px] font-semibold text-[#888888] uppercase tracking-wider">Paste Chat Message Transcript</label>
+                 <label className="block text-[11px] font-semibold text-[#888888] uppercase tracking-wider">Paste WhatsApp message</label>
                 <textarea 
                   value={whatsappText}
                   onChange={(e) => setWhatsappText(e.target.value)}
@@ -193,25 +193,25 @@ export default function Dashboard({ onNavigate, onOpenNewOrder }: DashboardProps
             </div>
 
             <div className="mt-4 pt-3 border-t border-[#1F1F1F] flex flex-col sm:flex-row justify-between items-center gap-3">
-              <span className="text-[10px] text-[#888888] flex items-center gap-1 font-mono">
-                Powered by Gemini-3.5-Flash
-              </span>
-              <button 
-                onClick={handleExtractOrder}
-                disabled={parseLoading}
-                className="w-full sm:w-auto px-4 py-2 bg-[#10B981] hover:bg-[#4edea3] text-black font-semibold text-xs rounded-sm flex items-center justify-center gap-1 transition-all cursor-pointer disabled:opacity-50"
-              >
-                {parseLoading ? "Processing Stream..." : "Extract & Process Order"}
-                <ArrowRight size={14} />
-              </button>
+               <span className="text-[10px] text-[#888888] flex items-center gap-1 font-mono">
+                 AI: Read messages
+               </span>
+                <button 
+                  onClick={handleExtractOrder}
+                  disabled={parseLoading}
+                  className="w-full sm:w-auto px-4 py-2 bg-[#10B981] hover:bg-[#4edea3] text-black font-semibold text-xs rounded-sm flex items-center justify-center gap-1 transition-all cursor-pointer disabled:opacity-50"
+                >
+                  {parseLoading ? "Processing..." : "Create order from WhatsApp"}
+                  <ArrowRight size={14} />
+                </button>
             </div>
 
             {/* Parse Result Feedback */}
             {parseSuccess && (
               <div className="mt-4 p-3 bg-[#162D20] border border-[#214F33] rounded-sm animate-pulse-soft">
-                <p className="text-xs font-semibold text-[#4edea3] flex items-center gap-1">
-                  <CheckCircle size={14} /> Extraction Success! Order #{parseSuccess.id} Processed
-                </p>
+                  <p className="text-xs font-semibold text-[#4edea3] flex items-center gap-1">
+                    <CheckCircle size={14} /> Order #{parseSuccess.id} created
+                  </p>
                 <div className="mt-2 text-[11px] text-[#888888] space-y-1 font-mono">
                   <div>Customer: <b className="text-white">{parseSuccess.customerName}</b></div>
                   <div>Items: {parseSuccess.items.map((i: any) => `${i.quantity}x ${i.productName}`).join(', ')}</div>

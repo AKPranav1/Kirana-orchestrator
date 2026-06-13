@@ -138,7 +138,7 @@ export default function NewOrderModal({ onClose, onSuccess }: NewOrderModalProps
         {/* Header */}
         <div className="p-5 border-b border-[#1F1F1F] flex justify-between items-center bg-[#161616]">
           <h3 className="text-sm font-semibold uppercase tracking-wider text-white flex items-center gap-2">
-            <ShoppingCart size={16} className="text-[#4edea3]" /> Place In-Store Order
+            <ShoppingCart size={16} className="text-[#4edea3]" /> Create Sale
           </h3>
           <button onClick={onClose} className="text-[#888888] hover:text-white cursor-pointer p-1">
             <X size={18} />
@@ -235,17 +235,17 @@ export default function NewOrderModal({ onClose, onSuccess }: NewOrderModalProps
             {/* Customer bind and summary section (Right) */}
             <form onSubmit={handleSubmit} className="w-full md:w-80 p-5 bg-[#0A0A0A] flex flex-col justify-between overflow-y-auto border-t md:border-t-0 border-[#1F1F1F]">
               <div className="space-y-4">
-                <h4 className="text-xs font-semibold text-[#888888] uppercase tracking-wider">Checkout Options</h4>
+                 <h4 className="text-xs font-semibold text-[#888888] uppercase tracking-wider">Checkout Options</h4>
 
                 {/* Bind to customer */}
                 <div className="space-y-2">
-                  <label className="block text-xs font-medium text-[#888888]">Customer (Optional)</label>
+                  <label className="block text-xs font-medium text-[#888888]">Customer (optional)</label>
                   <select 
                     value={selectedCustomerId}
                     onChange={(e) => setSelectedCustomerId(e.target.value)}
                     className="w-full bg-[#121212] border border-[#1F1F1F] rounded-sm text-xs p-2 text-white placeholder-[#888888] focus:border-white focus:outline-none cursor-pointer"
                   >
-                    <option value="">Walk-In Customer (No Khata)</option>
+                        <option value="">Walk-In Customer (No Khata)</option>
                     {customers.map(c => (
                       <option key={c.id} value={c.id}>
                         {c.name} ({c.phone}) - Bal: ₹{c.khataBalance}
@@ -259,28 +259,28 @@ export default function NewOrderModal({ onClose, onSuccess }: NewOrderModalProps
                   <div className="space-y-2">
                     <label className="block text-xs font-medium text-[#888888]">Payment Mode</label>
                     <div className="grid grid-cols-2 gap-2">
-                      <button
-                        type="button"
-                        onClick={() => setPaymentMethod('cash')}
-                        className={`py-1.5 px-3 rounded-sm border text-xs font-medium cursor-pointer ${
-                          paymentMethod === 'cash' 
-                            ? 'bg-white text-black border-white' 
-                            : 'bg-[#121212] text-[#888888] border-[#1F1F1F] hover:text-white'
-                        }`}
-                      >
-                        Paid (Cash/UPI)
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setPaymentMethod('khata')}
-                        className={`py-1.5 px-3 rounded-sm border text-xs font-medium cursor-pointer ${
-                          paymentMethod === 'khata' 
-                            ? 'bg-[#93000a]/20 text-red-400 border-red-500/50' 
-                            : 'bg-[#121212] text-[#888888] border-[#1F1F1F] hover:text-white'
-                        }`}
-                      >
-                        Charge to Khata
-                      </button>
+                        <button
+                          type="button"
+                          onClick={() => setPaymentMethod('cash')}
+                          className={`py-1.5 px-3 rounded-sm border text-xs font-medium cursor-pointer ${
+                            paymentMethod === 'cash' 
+                              ? 'bg-white text-black border-white' 
+                              : 'bg-[#121212] text-[#888888] border-[#1F1F1F] hover:text-white'
+                          }`}
+                        >
+                          Paid
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setPaymentMethod('khata')}
+                          className={`py-1.5 px-3 rounded-sm border text-xs font-medium cursor-pointer ${
+                            paymentMethod === 'khata' 
+                              ? 'bg-[#93000a]/20 text-red-400 border-red-500/50' 
+                              : 'bg-[#121212] text-[#888888] border-[#1F1F1F] hover:text-white'
+                          }`}
+                        >
+                          Add to Credit Book
+                        </button>
                     </div>
                   </div>
                 )}
@@ -309,19 +309,19 @@ export default function NewOrderModal({ onClose, onSuccess }: NewOrderModalProps
               </div>
 
               {/* Total and Submit */}
-              <div className="pt-4 border-t border-[#1F1F1F] mt-4 space-y-3">
+                 <div className="pt-4 border-t border-[#1F1F1F] mt-4 space-y-3">
                 <div className="flex justify-between items-baseline">
                   <span className="text-xs text-[#888888]">Grand Total:</span>
                   <span className="text-xl font-bold font-mono text-white">₹{getCartTotal()}</span>
                 </div>
 
-                <button
-                  type="submit"
-                  disabled={loading || Object.keys(cart).length === 0}
-                  className="w-full bg-[#10B981] hover:bg-[#4edea3] text-black font-semibold py-2 px-4 rounded-sm text-xs transition-colors cursor-pointer disabled:opacity-50"
-                >
-                  {loading ? "Processing..." : "Complete Order"}
-                </button>
+                 <button
+                   type="submit"
+                   disabled={loading || Object.keys(cart).length === 0}
+                   className="w-full bg-[#10B981] hover:bg-[#4edea3] text-black font-semibold py-2 px-4 rounded-sm text-xs transition-colors cursor-pointer disabled:opacity-50"
+                 >
+                   {loading ? "Processing..." : "Complete Sale"}
+                 </button>
               </div>
             </form>
           </div>

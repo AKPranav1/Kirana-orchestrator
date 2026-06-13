@@ -14,7 +14,7 @@ interface TopbarProps {
   onMenuToggle?: () => void;
 }
 
-export default function Topbar({ onSearchChange, searchPlaceholder = "Search catalog, orders...", onMenuToggle }: TopbarProps) {
+export default function Topbar({ onSearchChange, searchPlaceholder = "Search products or orders...", onMenuToggle }: TopbarProps) {
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [showDropdown, setShowDropdown] = useState(false);
 
@@ -62,10 +62,10 @@ export default function Topbar({ onSearchChange, searchPlaceholder = "Search cat
       {/* Right side controls */}
       <div className="flex items-center gap-4">
         {/* Store Active indicator */}
-        <div className="flex items-center gap-2 px-3 py-1 rounded bg-[#121212] border border-[#1F1F1F]">
-          <span className="w-2 h-2 rounded-full bg-[#10B981] animate-pulse-soft"></span>
-          <span className="text-xs font-medium text-[#888888]">Store: Online</span>
-        </div>
+          <div className="flex items-center gap-2 px-3 py-1 rounded bg-[#121212] border border-[#1F1F1F]">
+            <span className="w-2 h-2 rounded-full bg-[#10B981] animate-pulse-soft"></span>
+            <span className="text-xs font-medium text-[#888888]">Shop: Open</span>
+          </div>
 
         {/* Notif bell with Popover */}
         <div className="relative">
@@ -82,7 +82,7 @@ export default function Topbar({ onSearchChange, searchPlaceholder = "Search cat
           {showDropdown && (
             <div className="absolute right-0 mt-3 w-80 bg-[#121212] border border-[#1F1F1F] rounded-sm shadow-2xl p-4 z-50">
               <div className="flex justify-between items-center mb-3 pb-2 border-b border-[#1F1F1F]">
-                <h4 className="text-xs font-semibold text-white uppercase tracking-wider">Alerts & Insights</h4>
+                <h4 className="text-xs font-semibold text-white uppercase tracking-wider">Alerts</h4>
                 {getUnreadCount() > 0 && (
                   <button 
                     onClick={markAllRead}

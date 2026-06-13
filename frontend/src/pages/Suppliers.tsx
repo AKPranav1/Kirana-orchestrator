@@ -66,24 +66,24 @@ export default function Suppliers() {
       {/* Header */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
-          <h2 className="text-xl font-bold text-white tracking-tight">Suppliers Register</h2>
-          <p className="text-xs text-[#888888] mt-1">Manage B2B wholesale merchants, lead times, outstanding payables, and reorders.</p>
+          <h2 className="text-xl font-bold text-white tracking-tight">Wholesalers</h2>
+          <p className="text-xs text-[#888888] mt-1">Manage wholesalers, delivery times and amounts due.</p>
         </div>
         <button 
           onClick={() => setShowForm(!showForm)}
           className="px-4 py-2 bg-white text-black hover:bg-[#e2e2e2] font-semibold text-xs rounded-sm flex items-center gap-2 cursor-pointer transition-colors"
         >
-          <Plus size={14} /> Link Supplier Wholesaler
+          <Plus size={14} /> Add Wholesaler
         </button>
       </div>
 
       {/* Add Supplier Form */}
-      {showForm && (
+        {showForm && (
         <form onSubmit={handleAddSupplier} className="bg-[#121212] border border-[#10B981]/25 p-5 rounded-md space-y-4 max-w-2xl">
-          <h3 className="text-xs font-semibold uppercase tracking-wider text-white">Create B2B Wholesale Contact Card</h3>
+          <h3 className="text-xs font-semibold uppercase tracking-wider text-white">Add Wholesaler</h3>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
             <div className="space-y-1">
-              <label className="text-[#888888]">Wholesale Merchant Name</label>
+               <label className="text-[#888888]">Wholesaler name</label>
               <input 
                 type="text" 
                 value={name}
@@ -94,7 +94,7 @@ export default function Suppliers() {
               />
             </div>
             <div className="space-y-1">
-              <label className="text-[#888888]">Category Segment</label>
+               <label className="text-[#888888]">Category</label>
               <select 
                 value={category}
                 onChange={(e) => setCategory(e.target.value)}
@@ -107,7 +107,7 @@ export default function Suppliers() {
               </select>
             </div>
             <div className="space-y-1">
-              <label className="text-[#888888]">Primary Rep Name</label>
+               <label className="text-[#888888]">Contact person</label>
               <input 
                 type="text" 
                 value={contactName}
@@ -118,7 +118,7 @@ export default function Suppliers() {
               />
             </div>
             <div className="space-y-1">
-              <label className="text-[#888888]">Contact phone</label>
+               <label className="text-[#888888]">Phone</label>
               <input 
                 type="text" 
                 value={phone}
@@ -129,7 +129,7 @@ export default function Suppliers() {
               />
             </div>
             <div className="col-span-2 space-y-1">
-              <label className="text-[#888888]">Average Delivery Turnaround (Days)</label>
+               <label className="text-[#888888]">Delivery days (avg)</label>
               <input 
                 type="number" 
                 step="0.1"
@@ -153,7 +153,7 @@ export default function Suppliers() {
               type="submit" 
               className="px-3 py-1.5 bg-[#10B981] text-black font-semibold rounded-sm"
             >
-              Link Merchant Ledger
+              Add wholesaler
             </button>
           </div>
         </form>
@@ -163,13 +163,13 @@ export default function Suppliers() {
       <div className="relative w-full max-w-xl bg-[#121212] border border-[#1F1F1F] px-3 py-2 rounded-lg">
         <div className="relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-[#888888]" size={14} />
-          <input 
-            type="text"
-            placeholder="Search B2B merchant roll by keyword..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="w-full bg-transparent border-none text-xs pl-8 pr-4 text-white placeholder-[#888888] focus:outline-none"
-          />
+            <input 
+              type="text"
+              placeholder="Search wholesalers..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="w-full bg-transparent border-none text-xs pl-8 pr-4 text-white placeholder-[#888888] focus:outline-none"
+            />
         </div>
       </div>
 
