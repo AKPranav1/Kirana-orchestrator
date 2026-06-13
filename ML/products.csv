@@ -1,0 +1,26 @@
+product_name,category,base_daily_demand
+Rice,Staples,20
+Wheat Flour,Staples,25
+Cooking Oil,Staples,15
+Sugar,Staples,18
+Dal,Staples,14
+Salt,Staples,8
+Milk,Dairy,55
+Curd,Dairy,25
+Paneer,Dairy,12
+Butter,Dairy,15
+Maggi,Snacks & Beverages,45
+Bread,Snacks & Beverages,30
+Soft drinks,Snacks & Beverages,25
+Chips,Snacks & Beverages,40
+Biscuits,Snacks & Beverages,35
+Tea,Snacks & Beverages,35
+Coffee,Snacks & Beverages,15
+Soap,Personal Care,12
+Shampoo,Personal Care,8
+Toothpaste,Personal Care,10
+Detergent,Household,15
+Tomato Ketchup,Snacks & Beverages,10
+Spices,Staples,10
+Onions,Fresh Produce,30
+Potatoes,Fresh Produce,35
