@@ -7,7 +7,7 @@ FastAPI service: receives order JSON from Person 1 → MongoDB (pricing + khata 
 """
 
 import os
-import datetime
+from datetime import datetime, timezone, time
 from pathlib import Path
 
 import joblib
@@ -104,23 +104,48 @@ def ping_mongo():
 async def log_endpoint(req: LogRequest):
     """
     Called by Person 1's webhook router after an order arrives.
-
-    Sequence:
-      1. MongoDB: price enrichment + khata split + loyalty update  (must succeed)
-      2. Twilio:  text receipt → shopkeeper                        (always)
-      3. Twilio:  Vasooli voice note → customer                    (only if khata debt > ₹1500)
-
-    DB write failure  → 500  (Person 1 must know)
-    Alert failure     → 200 with alert_status describing the error (DB is safe, don't cascade)
     """
-    print(
-        f"\n[/log] 📥 {req.order.get('customer_name')} | "
-        f"₹{req.order.get('total_amount')} | mode={req.order.get('payment_mode')}"
-    )
+    raw_payload = req.order
+    
+    # ── THE ADAPTER: Convert Person 2's messy nested JSON into Person 3's clean format ──
+    clean_order = {
+        "customer_name": "Unknown",
+        "customer_phone": raw_payload.get("customer_phone", req.shopkeeper_phone),
+        "language": raw_payload.get("language", "hi"),
+        "payment_mode": raw_payload.get("payment_mode", "cash"),
+        "items": [],
+        "split_with": []
+    }
+
+    # Handle Person 2's deeply nested 'processed_splits' array
+    if "processed_splits" in raw_payload and len(raw_payload["processed_splits"]) > 0:
+        main_split = raw_payload["processed_splits"][0]
+        clean_order["customer_name"] = main_split.get("buyer_name", "Unknown")
+        
+        for item in main_split.get("items", []):
+            clean_order["items"].append({
+                "name": item.get("item_name", "item"),
+                "qty": item.get("quantity", 1)
+            })
+            
+        # Extra buyers go into split_with
+        if len(raw_payload["processed_splits"]) > 1:
+            for extra_split in raw_payload["processed_splits"][1:]:
+                clean_order["split_with"].append(extra_split.get("buyer_name", "Unknown"))
+    else:
+        # Fallback just in case Person 2 actually sends the correct flat JSON format
+        clean_order["customer_name"] = raw_payload.get("customer_name", "Unknown")
+        clean_order["items"] = raw_payload.get("items", [])
+        clean_order["split_with"] = raw_payload.get("split_with", [])
+
+    print(f"\n[/log] 📥 Adapted Order for DB: {clean_order}")
+    print(f"[/log]    Mode={clean_order['payment_mode']} | Lang={clean_order['language']}")
+    # ───────────────────────────────────────────────────────────────────────────────────
 
     try:
         # Step 1: MongoDB (critical — must succeed before anything else)
-        order_id, order_doc, highest_debt = db_log_order(req.order, req.shopkeeper_phone)
+        # PASS 'clean_order', NOT 'req.order'
+        order_id, order_doc, highest_debt = db_log_order(clean_order, req.shopkeeper_phone)
 
         alert_status = "success"
 
@@ -141,27 +166,18 @@ async def log_endpoint(req: LogRequest):
                     name  = order_doc["customer_name"]
                     count = increment_reminder_count(name, order_doc["store_id"])
 
-                    print(
-                        f"[/log] 🚨 Auto-Vasooli L{count} → {name} | debt=₹{highest_debt}"
-                    )
+                    print(f"[/log] 🚨 Auto-Vasooli L{count} → {name} | debt=₹{highest_debt}")
                     send_vasooli_alert(name, customer_phone, highest_debt, count, lang)
                     alert_status = "text_receipt_and_auto_vasooli_sent"
                 else:
-                    print(
-                        f"[/log] ⚠️ Debt ₹{highest_debt} > limit but no valid phone "
-                        f"for {order_doc['customer_name']} — Vasooli skipped"
-                    )
+                    print(f"[/log] ⚠️ Debt ₹{highest_debt} > limit but no valid phone for {order_doc['customer_name']} — Vasooli skipped")
                     alert_status = "vasooli_skipped_no_phone"
 
         except Exception as api_err:
-            # Alert APIs failing must not block the 200 response to Person 1
             print(f"[/log] ⚠️ DB OK but alert API error: {api_err}")
             alert_status = f"api_failed: {api_err}"
 
-        print(
-            f"[/log] ✅ order_id={order_id} | "
-            f"total=₹{order_doc.get('total_amount')} | {alert_status}\n"
-        )
+        print(f"[/log] ✅ order_id={order_id} | total=₹{order_doc.get('total_amount')} | {alert_status}\n")
 
         response_order = dict(order_doc)
         response_order["created_at"] = str(response_order.get("created_at", ""))
@@ -282,9 +298,9 @@ def dashboard_metrics():
     Derived aggregates for the React Dashboard page.
     Uses get_db() (the public alias) — no internal _get_db import needed.
     """
-    db      = get_db()
-    today   = datetime.datetime.utcnow().date()
-    day_start = datetime.datetime.combine(today, datetime.time.min)
+    db        = get_db()
+    today     = datetime.now(timezone.utc).date()
+    day_start = datetime.combine(today, time.min).replace(tzinfo=timezone.utc)
 
     todays_orders = list(
         db["orders"].find({"created_at": {"$gte": day_start}}, {"total_amount": 1})
@@ -297,16 +313,18 @@ def dashboard_metrics():
         for k in db["khata"].find({}, {"total_outstanding": 1})
     )
 
+    collections = db.list_collection_names()
+
     low_stock_count = db["products"].count_documents({"stock_quantity": {"$lt": 5}}) \
-        if "products" in db.list_collection_names() else 0
+        if "products" in collections else 0
 
     pending_deliveries = db["purchase_orders"].count_documents({"status": "In Transit"}) \
-        if "purchase_orders" in db.list_collection_names() else 0
+        if "purchase_orders" in collections else 0
 
     pending_supplier_pay = sum(
         s.get("outstanding_balance", 0)
         for s in db["suppliers"].find({}, {"outstanding_balance": 1})
-    ) if "suppliers" in db.list_collection_names() else 0
+    ) if "suppliers" in collections else 0
 
     return {
         "todaysRevenue":         round(todays_revenue, 2),
