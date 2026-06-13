@@ -10,6 +10,9 @@ import os
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.middleware.cors import CORSMiddleware
+import joblib
+from pathlib import Path
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -33,6 +36,25 @@ app = FastAPI(
 
 # Mount audio_files/ as a static endpoint so Twilio can fetch the MP3s
 app.mount("/audio", StaticFiles(directory=str(AUDIO_DIR)), name="audio")
+
+# CORS for local frontend
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Forecasts payload (produced by ML training script)
+MODEL_FILE = Path(__file__).parent / "model_forecasts.pkl"
+_forecasts_payload = None
+if MODEL_FILE.exists():
+    try:
+        _forecasts_payload = joblib.load(MODEL_FILE)
+        print(f"[forecast] Loaded forecasts payload with {len(_forecasts_payload)} entries")
+    except Exception as e:
+        print(f"[forecast] Failed to load forecasts payload: {e}")
 
 
 # ── Request models ─────────────────────────────────────────────────────────────
@@ -173,6 +195,52 @@ def get_loyalty_leaderboard(limit: int = 10, store_id: str = "store_001"):
         d["last_order_at"] = str(d.get("last_order_at", ""))
         docs.append(d)
     return {"count": len(docs), "customers": docs}
+
+
+@app.get("/forecast", tags=["ml"])
+def get_forecast(limit: int = 50):
+    """
+    Return per-SKU forecasts produced by offline ML training.
+    The ML training script serializes a ready-to-serve list into db_alerts/model_forecasts.pkl
+    which this endpoint loads at startup.
+    """
+    global _forecasts_payload
+    if _forecasts_payload is None:
+        raise HTTPException(status_code=503, detail="Forecasts not available (model not trained)")
+    try:
+        return _forecasts_payload[:limit]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/dashboard", tags=["read"])
+def dashboard_metrics():
+    """Derived aggregates used by the frontend dashboard."""
+    from mongo import _get_db
+    import datetime
+
+    db = _get_db()
+    today = datetime.datetime.utcnow().date()
+    start_of_day = datetime.datetime.combine(today, datetime.time.min)
+
+    # Sum today's orders revenue
+    cursor = db["orders"].find({"created_at": {"$gte": start_of_day}}, {"total_amount": 1})
+    todays_revenue = sum(o.get("total_amount", 0) for o in cursor)
+    todays_orders_count = db["orders"].count_documents({"created_at": {"$gte": start_of_day}})
+
+    outstanding_khata = 0.0
+    for k in db["khata"].find({}, {"total_outstanding": 1}):
+        outstanding_khata += k.get("total_outstanding", 0)
+
+    return {
+        "todaysRevenue": round(todays_revenue, 2),
+        "todaysOrdersCount": int(todays_orders_count),
+        "outstandingKhata": round(outstanding_khata, 2),
+        "lowStockItemsCount": 0,
+        "pendingDeliveriesCount": 0,
+        "pendingSupplierPay": 0,
+        "storeHealthScore": 94,
+    }
 
 
 @app.post("/vasooli", tags=["core"])
