@@ -1,13 +1,12 @@
 import os
 import httpx
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from dotenv import load_dotenv
 
 load_dotenv()
 
-from ingestion.schema import FinalOrderManifest
 from ingestion.utils import normalize_text
 from ingestion.gemini import parse_order_text
 from ingestion.sarvam import speech_to_text, vision_ocr
@@ -15,31 +14,34 @@ from ingestion.sku_match import SKUMatcher
 from ingestion.orchestrator import orchestrate_order_processing
 from ingestion.pdf_generator import compile_invoice_document
 
-TWILIO_SID = os.getenv("TWILIO_ACCOUNT_SID")
+TWILIO_SID   = os.getenv("TWILIO_ACCOUNT_SID")
 TWILIO_TOKEN = os.getenv("TWILIO_AUTH_TOKEN")
 
-app = FastAPI()
+app = FastAPI(title="Kirana AI — Ingestion", version="1.0.0")
 
 CATALOG_PATH = os.path.join(os.path.dirname(__file__), "data", "sku_catalog.json")
 matcher = SKUMatcher(CATALOG_PATH)
 
+
 class ProcessRequest(BaseModel):
     payload_type: str
     payload: str
-    customer_phone: str
+    customer_phone: str = "unknown"
+
 
 @app.get("/health")
 async def health():
-    return {"status": "ok"}
+    return {"status": "ok", "service": "ingestion", "port": 8001}
+
 
 @app.post("/process")
 async def process(req: ProcessRequest):
-    payload_type = req.payload_type
-    payload = req.payload
+    payload_type  = req.payload_type
+    payload       = req.payload
     raw_input_url = None
-    clean_text = ""
+    clean_text    = ""
 
-    # 1. HANDLE MULTIMODAL (Keeps your Twilio/Sarvam Logic!)
+    # ── 1. MULTIMODAL INGESTION ────────────────────────────────────
     if payload_type == "audio":
         raw_input_url = payload
         try:
@@ -67,27 +69,54 @@ async def process(req: ProcessRequest):
     else:
         clean_text, _ = normalize_text(payload)
 
+    # ── 2. LLM EXTRACTION + SKU MATCHING ──────────────────────────
     try:
-        # 2. RUN BULLETPROOF LLM EXTRACTION
-        parsed_structural_json = await parse_order_text(clean_text)
-        
-        # 3. RUN DETERMINISTIC MATH & SKU MATCHING
+        parsed = await parse_order_text(clean_text)
+
         input_meta = {
-            "input_type": payload_type, 
-            "raw_input_url": raw_input_url,
-            "customer_phone": req.customer_phone  # Pass it down!
+            "input_type":     payload_type,
+            "raw_input_url":  raw_input_url,
+            "customer_phone": req.customer_phone,
         }
-        final_manifest = orchestrate_order_processing(parsed_structural_json, input_meta, matcher)
-        
-        # 4. GENERATE PDF IF REQUESTED
+        final_manifest = orchestrate_order_processing(parsed, input_meta, matcher)
+
+        # ── 3. PDF (optional) ──────────────────────────────────────
         if final_manifest.pdf_requested:
             os.makedirs("shared_billing_dump", exist_ok=True)
             for split in final_manifest.processed_splits:
                 pdf_binary = compile_invoice_document(final_manifest, split.buyer_name)
                 with open(f"shared_billing_dump/bill_{split.buyer_name}.pdf", "wb") as f:
                     f.write(pdf_binary.read())
-        
-        return JSONResponse(status_code=200, content=final_manifest.model_dump())
-        
+
+        # ── 4. Translate FinalOrderManifest → flat order dict ──────
+        # Person 3's mongo_connector expects flat dict with "items" key.
+        # FinalOrderManifest uses "processed_splits" — this bridges the gap.
+        first_split  = final_manifest.processed_splits[0] if final_manifest.processed_splits else None
+        other_splits = final_manifest.processed_splits[1:] if len(final_manifest.processed_splits) > 1 else []
+
+        flat_order = {
+            "customer_phone": final_manifest.customer_phone,
+            "customer_name":  first_split.buyer_name if first_split else "Unknown",
+            "store_id":       "store_001",
+            "items": [
+                {
+                    "name":       item.item_name,
+                    "qty":        item.quantity,
+                    "unit":       item.unit,
+                    "unit_price": None,  # Person 3 enriches from STORE_PRICES
+                }
+                for item in (first_split.items if first_split else [])
+            ],
+            "split_with":    [s.buyer_name for s in other_splits],
+            "payment_mode":  final_manifest.payment_mode,
+            "input_type":    final_manifest.input_type,
+            "raw_input_url": final_manifest.raw_input_url,
+            "total_amount":  None,  # Person 3 computes after price enrichment
+        }
+
+        print(f"[INGESTION] returning flat_order with {len(flat_order['items'])} items")
+        return JSONResponse(status_code=200, content=flat_order)
+
     except Exception as e:
+        print(f"[INGESTION ERROR] {e}")
         return JSONResponse(status_code=500, content={"error": True, "details": str(e)})

@@ -7,7 +7,7 @@ app = FastAPI()
 
 INGESTION_URL = os.getenv("INGESTION_URL", "http://localhost:8001/process")
 DB_ALERTS_URL = os.getenv("DB_ALERTS_URL", "http://localhost:8002/log")
-SHOPKEEPER_PHONE = os.getenv("SHOPKEEPER_PHONE", "whatsapp:+91XXXXXXXXXX")
+SHOPKEEPER_PHONE = os.getenv("SHOPKEEPER_PHONE", "whatsapp:+919986013436")
 
 
 @app.post("/webhook")
@@ -33,7 +33,8 @@ async def webhook(request: Request):
         async with httpx.AsyncClient(timeout=60) as client:
             r = await client.post(INGESTION_URL, json={
                 "payload_type": payload_type,
-                "payload": payload
+                "payload": payload,
+                "customer_phone": sender,  # FIX: pass sender as customer_phone
             })
             order = r.json()
             print(f"[INGESTION] {order}")

@@ -15,7 +15,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from dotenv import load_dotenv
 
-from mongo  import log_order as db_log_order, get_khata_balance
+from mongo_connector import log_order as db_log_order, get_khata_balance
 from alerts import send_alert, send_vasooli_alert, create_text_bill
 
 load_dotenv()
