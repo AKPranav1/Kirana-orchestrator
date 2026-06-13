@@ -1,56 +1,35 @@
 import os
-import json
-import httpx
-from typing import Tuple, Any
-from dotenv import load_dotenv  # <-- ADD THIS
+from google import genai
+from google.genai import types
+from .schema import ParsedOrderPayload
 
-load_dotenv()
+SYSTEM_INSTRUCTION = """
+You are the structural parsing brain of an enterprise Kirana Management System. Your strict function is to extract semantic data from unstructured user strings.
 
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-
-SYSTEM = """You are a Kirana store order parser for Indian grocery stores.
-Input may be Hindi (Devanagari), Hinglish, English, or mixed script.
-
-Strict Schema Required:
-{
-  "items": [{"name": "string", "qty": "float", "unit": "string"}],
-  "split_with": ["string"],
-  "payment_mode": "cash" | "upi" | "khata"
-}
-
-Rules:
-- Convert numerals: ek->1, do->2, teen->3, char->4, paanch->5, aadha->0.5
-- Units allowed: kg, litre, packet, piece, gm
-- split_with: list of names mentioned, empty if none
-- payment_mode default: "khata" if split is mentioned, otherwise "cash"
+OPERATIONAL PARAMETERS:
+1. Multi-lingual Adaptability: Accept inputs in pure English, Hindi, Hinglish, or mixed-code variations. Map semantic concepts accurately regardless of syntax or phonetic spelling.
+2. Payment Intent Tracking: If phrases like "khate me likho", "account me daal dena", "udhaar karo", or "put it on my tab" are detected, set payment_intent to 'khata'.
+3. PDF/Statement Detection: If the user requests an itemized bill record or statement ("pdf bill de do", "hisab ka list bhejo", "generate history document"), set request_pdf to true.
+4. Entity Split Grouping: Identify individual names if multiple buyers are embedded in a single sentence (e.g., "Mohan ko ek doodh packet aur Anil ko 2kg sugar"). Group items explicitly inside separate 'raw_splits' entities matching those names. If no name is given, assign items to buyer_name 'default'.
+5. Mathematical Isolation: Perform ZERO arithmetic, addition, tracking of prices, or valuation. Extract structural data tokens only.
 """
 
-async def extract_order_from_text(clean_text: str, debug: bool = False) -> Tuple[dict, Any]:
-    if not GEMINI_API_KEY:
-        return {"items": [{"name": "mock item", "qty": 1.0, "unit": "packet"}], "split_with": [], "payment_mode": "khata"}, {"mock": True}
-
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
+async def parse_order_text(text_content: str) -> ParsedOrderPayload:
+    api_key = os.getenv("GEMINI_API_KEY")
+    if not api_key:
+        raise ValueError("CRITICAL FAILURE: GEMINI_API_KEY variable is absent from your environment configuration.")
     
-    payload = {
-        "contents": [{"parts": [{"text": clean_text}]}],
-        "systemInstruction": {"parts": [{"text": SYSTEM}]},
-        "generationConfig": {
-            "temperature": 0.1,
-            "responseMimeType": "application/json"
-        }
-    }
-
-    async with httpx.AsyncClient(timeout=30) as client:
-        try:
-            r = await client.post(url, headers={"Content-Type": "application/json"}, json=payload)
-            if r.status_code != 200:
-                print(f"❌ Gemini Error: {r.status_code} - {r.text}")
-                return {"items": [], "split_with": [], "payment_mode": "cash", "error": True}, {"error": r.text}
-            
-            # Since responseMimeType is application/json, this text is pure JSON
-            raw_text = r.json()["candidates"][0]["content"]["parts"][0]["text"]
-            return json.loads(raw_text.strip()), {"raw": raw_text}
-            
-        except Exception as e:
-            print(f"❌ Gemini Exception: {e}")
-            return {"items": [], "split_with": [], "payment_mode": "cash", "error": True}, {"error": str(e)}
+    # The new SDK uses a Client object instead of global configuration
+    client = genai.Client(api_key=api_key)
+    
+    response = client.models.generate_content(
+        model="gemini-2.5-flash",
+        contents=f"Raw Unprocessed Ingestion Line: {text_content}",
+        config=types.GenerateContentConfig(
+            system_instruction=SYSTEM_INSTRUCTION,
+            response_mime_type="application/json",
+            response_schema=ParsedOrderPayload
+        )
+    )
+    
+    return ParsedOrderPayload.model_validate_json(response.text)
