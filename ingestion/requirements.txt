@@ -5,3 +5,5 @@ pydantic
 rapidfuzz
 python-multipart
 python-dotenv
+google-genai
+reportlab
