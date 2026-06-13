@@ -108,8 +108,8 @@ export default function LiveOrders({ onOpenNewOrder }: LiveOrdersProps) {
       {/* Header */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
-          <h2 className="text-xl font-bold text-white tracking-tight">WhatsApp / Live Orders Queue</h2>
-          <p className="text-xs text-[#888888] mt-1">Track incoming WhatsApp customer messages and clear order executions.</p>
+          <h2 className="text-xl font-bold text-white tracking-tight">Incoming Orders</h2>
+          <p className="text-xs text-[#888888] mt-1">See incoming orders from WhatsApp and in-store.</p>
         </div>
         <button 
           onClick={onOpenNewOrder}
@@ -122,14 +122,14 @@ export default function LiveOrders({ onOpenNewOrder }: LiveOrdersProps) {
       {/* Filters and Search controls */}
       <div className="bg-[#121212] border border-[#1F1F1F] rounded-lg p-3 flex flex-wrap gap-3 items-center">
         <div className="relative flex-1 min-w-[200px]">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-[#888888]" size={14} />
-          <input 
-            type="text"
-            placeholder="Search orders by customer or ID..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="w-full bg-[#0F0F0F] border border-[#1F1F1F] rounded-sm text-xs pl-9 pr-4 py-2 text-white placeholder-[#888888] focus:border-white focus:outline-none"
-          />
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-[#888888]" size={14} />
+            <input 
+              type="text"
+              placeholder="Search by customer or ID..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="w-full bg-[#0F0F0F] border border-[#1F1F1F] rounded-sm text-xs pl-9 pr-4 py-2 text-white placeholder-[#888888] focus:border-white focus:outline-none"
+            />
         </div>
 
         {/* Categories togglers */}

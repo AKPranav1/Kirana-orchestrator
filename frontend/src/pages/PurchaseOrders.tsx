@@ -67,15 +67,15 @@ export default function PurchaseOrders() {
       {/* Header */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
-          <h2 className="text-xl font-bold text-white tracking-tight">Purchase Procurement Orders</h2>
-          <p className="text-xs text-[#888888] mt-1">Submit B2B restocking requests to suppliers and clear incoming warehouse cargo.</p>
+          <h2 className="text-xl font-bold text-white tracking-tight">Orders to Wholesalers</h2>
+          <p className="text-xs text-[#888888] mt-1">Send restock orders to wholesalers and mark deliveries.</p>
         </div>
-        <button 
-          onClick={loadPOs}
-          className="px-3.5 py-1.5 bg-[#121212] hover:bg-white hover:text-black border border-[#1F1F1F] text-xs font-semibold text-white rounded-sm flex items-center gap-1.5 cursor-pointer transition-all"
-        >
-          <RefreshCw size={12} /> Reload Procurement Stream
-        </button>
+          <button 
+            onClick={loadPOs}
+            className="px-3.5 py-1.5 bg-[#121212] hover:bg-white hover:text-black border border-[#1F1F1F] text-xs font-semibold text-white rounded-sm flex items-center gap-1.5 cursor-pointer transition-all"
+          >
+            <RefreshCw size={12} /> Reload orders
+          </button>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
@@ -94,10 +94,10 @@ export default function PurchaseOrders() {
               <table className="w-full text-left border-collapse">
                 <thead>
                   <tr className="border-b border-[#1F1F1F] text-[#888888] text-[10px] uppercase font-bold tracking-wider bg-[#0F0F0F]">
-                    <th className="p-4 font-semibold">PO Reference</th>
-                    <th className="p-4 font-semibold">B2B Wholesaler</th>
-                    <th className="p-4 font-semibold">Consolidated Value</th>
-                    <th className="p-4 font-semibold">Fulfillment status</th>
+                    <th className="p-4 font-semibold">PO ID</th>
+                    <th className="p-4 font-semibold">Wholesaler</th>
+                    <th className="p-4 font-semibold">Total value</th>
+                    <th className="p-4 font-semibold">Status</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[#1F1F1F] text-xs">

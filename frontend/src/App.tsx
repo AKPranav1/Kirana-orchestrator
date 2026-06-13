@@ -105,19 +105,19 @@ export default function App() {
 
             {/* Menu Links */}
             <div className="flex-1 overflow-y-auto space-y-1">
-              {[
-                { id: 'dashboard', name: 'Dashboard' },
-                { id: 'orders', name: 'Live Orders' },
-                { id: 'customers', name: 'Customers' },
-                { id: 'khata', name: 'Khata Ledger' },
-                { id: 'inventory', name: 'Product Catalog' },
-                { id: 'purchase_orders', name: 'Purchase Orders' },
-                { id: 'suppliers', name: 'Suppliers' },
-                { id: 'analytics', name: 'Analytics' },
-                { id: 'forecasts', name: 'AI Forecasts' },
-                { id: 'reports', name: 'Reports' },
-                { id: 'settings', name: 'Settings' }
-              ].map((item) => {
+               {[
+                 { id: 'dashboard', name: 'Home' },
+                 { id: 'orders', name: 'Incoming Orders' },
+                 { id: 'customers', name: 'Customers' },
+                 { id: 'khata', name: 'Credit Book' },
+                 { id: 'inventory', name: 'Products' },
+                 { id: 'purchase_orders', name: 'Orders to Supplier' },
+                 { id: 'suppliers', name: 'Wholesalers' },
+                 { id: 'analytics', name: 'Sales Insights' },
+                 { id: 'forecasts', name: 'Stock Suggestions' },
+                 { id: 'reports', name: 'Reports' },
+                 { id: 'settings', name: 'Settings' }
+               ].map((item) => {
                 const isActive = activeTab === item.id;
                 return (
                   <button

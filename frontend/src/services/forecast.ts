@@ -4,7 +4,6 @@
  */
 
 import { Forecast } from '../types';
-import { mockForecasts } from '../data/forecast';
 import { DB_ALERTS_FORECAST } from '../config';
 
 export const forecastService = {
@@ -15,8 +14,9 @@ export const forecastService = {
       const json = await res.json();
       return json as Forecast[];
     } catch (e) {
-      // Prefer persisted forecasts if available, otherwise use mock forecasts for demo
-      return JSON.parse(localStorage.getItem('ka_forecasts') || 'null') || mockForecasts;
+      // Backend unavailable — return empty list so UI shows no forecasts instead of demo mocks
+      console.warn('forecastService.getForecasts failed:', e);
+      return [];
     }
   }
 };

@@ -113,21 +113,21 @@ export default function Inventory() {
       {/* Header */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
-          <h2 className="text-xl font-bold text-white tracking-tight">Product Catalog & Inventory</h2>
-          <p className="text-xs text-[#888888] mt-1">Configure unit pricing, track cost margins, and trigger instant stock adjustments.</p>
+          <h2 className="text-xl font-bold text-white tracking-tight">Products & Stock</h2>
+          <p className="text-xs text-[#888888] mt-1">Set prices and manage stock.</p>
         </div>
         <button 
           onClick={() => setShowForm(!showForm)}
           className="px-4 py-2 bg-white text-black hover:bg-[#e2e2e2] font-semibold text-xs rounded-sm flex items-center gap-2 cursor-pointer transition-colors"
         >
-          <Plus size={14} /> Add New Catalog Product
+          <Plus size={14} /> Add New Product
         </button>
       </div>
 
       {/* Add Product standard form block */}
-      {showForm && (
+        {showForm && (
         <form onSubmit={handleAddProduct} className="bg-[#121212] border border-[#10B981]/20 p-5 rounded-md space-y-4 max-w-2xl">
-          <h3 className="text-xs font-semibold uppercase tracking-wider text-white">Create Inventory Item</h3>
+          <h3 className="text-xs font-semibold uppercase tracking-wider text-white">Add Product</h3>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
             <div className="space-y-1">
               <label className="text-[#888888]">Product Name</label>
@@ -141,7 +141,7 @@ export default function Inventory() {
               />
             </div>
             <div className="space-y-1">
-              <label className="text-[#888888]">SKU / Barcode ID</label>
+               <label className="text-[#888888]">SKU / Barcode</label>
               <input 
                 type="text" 
                 value={sku} 
@@ -167,7 +167,7 @@ export default function Inventory() {
               </select>
             </div>
             <div className="space-y-1">
-              <label className="text-[#888888]">Selling Unit Price (₹)</label>
+               <label className="text-[#888888]">Selling price (₹)</label>
               <input 
                 type="number" 
                 value={unitPrice} 
@@ -178,7 +178,7 @@ export default function Inventory() {
               />
             </div>
             <div className="space-y-1">
-              <label className="text-[#888888]">B2B Wholesaler Cost Price (₹)</label>
+               <label className="text-[#888888]">Wholesaler cost (₹)</label>
               <input 
                 type="number" 
                 value={costPrice} 
@@ -189,7 +189,7 @@ export default function Inventory() {
               />
             </div>
             <div className="space-y-1">
-              <label className="text-[#888888]">B2B Supplier</label>
+               <label className="text-[#888888]">Wholesaler</label>
               <select 
                 value={supplierId} 
                 onChange={(e) => setSupplierId(e.target.value)}
@@ -203,7 +203,7 @@ export default function Inventory() {
               </select>
             </div>
             <div className="space-y-1 md:col-span-3">
-              <label className="text-[#888888]">Initial Intake Stock Quantity</label>
+               <label className="text-[#888888]">Initial stock quantity</label>
               <input 
                 type="number" 
                 value={stockQuantity} 
@@ -226,7 +226,7 @@ export default function Inventory() {
               type="submit" 
               className="px-3 py-1.5 bg-[#10B981] text-black font-semibold rounded-sm"
             >
-              Import Product to Catalog
+              Add product
             </button>
           </div>
         </form>
@@ -236,13 +236,13 @@ export default function Inventory() {
       <div className="bg-[#121212] border border-[#1F1F1F] rounded-lg p-3 flex flex-wrap gap-3 items-center">
         <div className="relative flex-1 min-w-[200px]">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-[#888888]" size={14} />
-          <input 
-            type="text"
-            placeholder="Search catalog by name or SKU..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="w-full bg-[#0F0F0F] border border-[#1F1F1F] rounded-sm text-xs pl-9 pr-4 py-2 text-white"
-          />
+            <input 
+              type="text"
+              placeholder="Search product name or SKU..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="w-full bg-[#0F0F0F] border border-[#1F1F1F] rounded-sm text-xs pl-9 pr-4 py-2 text-white"
+            />
         </div>
 
         <div className="flex gap-1 overflow-x-auto">
