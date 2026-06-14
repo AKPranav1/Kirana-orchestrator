@@ -1,0 +1,81 @@
+# render.yaml
+
+services:
+  # 1. Webhook Receiver Service
+  - type: web
+    name: kirana-webhook
+    runtime: python
+    rootDir: webhook
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: INGESTION_URL
+        fromService:
+          name: kirana-ingestion
+          type: web
+          property: url
+          envVarKey: INGESTION_URL
+      - key: DB_ALERTS_URL
+        fromService:
+          name: kirana-db-alerts
+          type: web
+          property: url
+          envVarKey: DB_ALERTS_URL
+
+  # 2. Ingestion Engine Service
+  - type: web
+    name: kirana-ingestion
+    runtime: python
+    rootDir: ingestion
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: SARVAM_API_KEY
+        sync: false
+      - key: DB_ALERTS_URL
+        fromService:
+          name: kirana-db-alerts
+          type: web
+          property: url
+          envVarKey: DB_ALERTS_URL
+
+  # 3. Database + Alerts Service
+  - type: web
+    name: kirana-db-alerts
+    runtime: python
+    rootDir: db_alerts
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: MONGO_URI
+        sync: false
+      - key: TWILIO_ACCOUNT_SID
+        sync: false
+      - key: TWILIO_AUTH_TOKEN
+        sync: false
+      - key: ELEVENLABS_API_KEY
+        sync: false
+      - key: PUBLIC_BASE_URL
+        sync: false
+
+  # 4. Frontend Static Site
+  - type: static
+    name: kirana-frontend
+    rootDir: frontend
+    buildCommand: npm install && npm run build
+    staticPublishPath: ./dist
+    envVars:
+      - key: VITE_DB_ALERTS_URL
+        fromService:
+          name: kirana-db-alerts
+          type: web
+          property: url
+          envVarKey: VITE_DB_ALERTS_URL
+      - key: VITE_INGESTION_URL
+        fromService:
+          name: kirana-ingestion
+          type: web
+          property: url
+          envVarKey: VITE_INGESTION_URL
