@@ -25,7 +25,7 @@ from mongo_connector import (
     increment_reminder_count,
     get_db,
 )
-from alerts import send_receipt_only, send_vasooli_alert, create_text_bill
+from alerts import send_receipt_only, send_vasooli_alert, create_text_bill, _normalize_phone
 
 load_dotenv()
 
@@ -131,6 +131,51 @@ async def log_endpoint(req: LogRequest):
     Called by Person 1's webhook router after an order arrives.
     """
     raw_payload = req.order or {}
+    # Support ingestion returning a batch of flat orders
+    if isinstance(raw_payload, dict) and "batch_orders" in raw_payload:
+        orders = raw_payload.get("batch_orders", [])
+        results = []
+        for o in orders:
+            # Skip empty orders to avoid creating zero-value records and noisy receipts
+            if not o.get("items") or len(o.get("items", [])) == 0:
+                print(f"[log] ⚠️ Skipping empty batch order (no items): {o}")
+                results.append({"status": "skipped", "reason": "no_items_parsed", "order": o})
+                continue
+            try:
+                order_id, order_doc, highest_debt = db_log_order(o, req.shopkeeper_phone)
+
+                # Send shopkeeper receipt (always)
+                try:
+                    send_receipt_only(order_doc, req.shopkeeper_phone)
+                except Exception as e:
+                    print(f"[DB+ALERT] failed to send shopkeeper receipt for {order_id}: {e}")
+
+                # Send customer receipt if we have a valid customer phone and it's different
+                cust_phone = order_doc.get("customer_phone", "")
+                phone_digits = "".join(c for c in cust_phone if c.isdigit())
+                if len(phone_digits) >= 10 and (_normalize_phone(cust_phone) != _normalize_phone(req.shopkeeper_phone)):
+                    try:
+                        send_receipt_only(order_doc, cust_phone)
+                    except Exception as e:
+                        print(f"[DB+ALERT] failed to send customer receipt for {order_id}: {e}")
+
+                # Auto-Vasooli if khata order crossed the warning limit
+                alert_status = "success"
+                try:
+                    if order_doc.get("payment_mode", "").lower() == "khata" and highest_debt > DEBT_WARNING_LIMIT:
+                        name = order_doc.get("customer_name")
+                        count = increment_reminder_count(name, order_doc.get("store_id"))
+                        send_vasooli_alert(name, order_doc.get("customer_phone", ""), highest_debt, count, order_doc.get("language", "hi"))
+                        alert_status = "text_receipt_and_auto_vasooli_sent"
+                except Exception as e:
+                    print(f"[log] ⚠️ DB OK but alert API error for {order_id}: {e}")
+
+                response_order = dict(order_doc)
+                response_order["created_at"] = str(response_order.get("created_at", ""))
+                results.append({"status": "success", "order_id": order_id, "order": response_order, "alert_status": alert_status})
+            except Exception as e:
+                results.append({"status": "error", "error": str(e), "order": o})
+        return JSONResponse(status_code=200, content={"batch": results})
     if not isinstance(raw_payload, dict):
         print("[/log] ⚠️ Received non-dict payload; coercing to empty dict for safety")
         raw_payload = {}
@@ -185,8 +230,8 @@ async def log_endpoint(req: LogRequest):
             )
 
     # 4. Last resort: nothing usable came through (e.g. ingestion error → {})
-    if clean_order is None:
-        clean_order = {
+        if clean_order is None:
+            clean_order = {
             "customer_name": raw_payload.get("customer_name", "Unknown"),
             "customer_phone": raw_payload.get("customer_phone", req.shopkeeper_phone),
             "language": raw_payload.get("language", "hi"),
@@ -200,6 +245,13 @@ async def log_endpoint(req: LogRequest):
         f"[/log]    Mode={clean_order['payment_mode']} | Lang={clean_order['language']}"
     )
     # ───────────────────────────────────────────────────────────────────────────────────
+
+    # If there are no items, do not persist an empty order. Return a skipped result so the
+    # caller (ingestion/webhook) can prompt the user for clarification instead of creating
+    # noisy zero-value orders and receipts.
+    if not clean_order.get("items") or len(clean_order.get("items", [])) == 0:
+        print(f"[/log] ⚠️ Skipping persist: no items parsed for {clean_order.get('customer_name')} | phone={clean_order.get('customer_phone')}")
+        return JSONResponse(status_code=200, content={"status": "skipped", "reason": "no_items_parsed", "order": clean_order})
 
     try:
         # Step 1: MongoDB (critical — must succeed before anything else)

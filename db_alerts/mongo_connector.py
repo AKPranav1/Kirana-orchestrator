@@ -15,6 +15,7 @@ FIXES APPLIED:
 """
 
 import os
+import re
 import uuid
 from datetime import datetime, timezone
 from pymongo import MongoClient, ReturnDocument
@@ -184,12 +185,25 @@ def _write_order(
         "original_total":   original_total,
         "discount_applied": discount_applied,
         "total_amount":     final_total,
+        # split_shares maps each party -> their share of the final_total (useful for downstream UIs and audits)
+        "split_shares": {},
         "shopkeeper_phone": shopkeeper_phone,
         "created_at":       now,
         "status":           "pending",
     }
 
     orders_col.insert_one(order_doc)
+    # Populate split_shares for visibility: include primary + any split_with
+    try:
+        parties = list(dict.fromkeys([order_doc.get("customer_name")] + (order_doc.get("split_with") or [])))
+        if parties:
+            per_person = round(order_doc.get("total_amount", 0.0) / len(parties), 2)
+            for p in parties:
+                order_doc["split_shares"][p] = per_person
+            # write this back to the DB document so it's persisted
+            orders_col.update_one({"order_id": order_id}, {"$set": {"split_shares": order_doc["split_shares"]}})
+    except Exception:
+        pass
     order_doc.pop("_id", None)
 
     print(
@@ -262,24 +276,36 @@ def _update_customer_lifetime_value(
     if total_amount <= 0:
         return
 
-    result = customers_col.find_one_and_update(
-        {"customer_name": name, "store_id": store_id},
-        {
-            "$inc": {"lifetime_spend": total_amount, "order_count": 1},
-            "$set": {"last_order_at": datetime.now(timezone.utc)},
-            "$setOnInsert": {
-                "customer_name":  name,
-                "store_id":       store_id,
-                "customer_phone": order_doc.get("customer_phone", ""),
-            },
-        },
-        upsert=True,
-        return_document=ReturnDocument.AFTER,
-    )
-    print(
-        f"[MongoDB] 🏆 Loyalty: {name} | "
-        f"lifetime=₹{result['lifetime_spend']} | orders={result['order_count']}"
-    )
+    # If the order had split parties, distribute lifetime spend and order_count
+    # proportionally among all parties so loyalty isn't fully credited to the
+    # primary customer when the basket was shared.
+    split_with = order_doc.get("split_with", []) or []
+    parties = list(dict.fromkeys([name] + split_with))
+    per_person = round(total_amount / len(parties), 2) if parties else total_amount
+
+    for person in parties:
+        try:
+            # Case-insensitive match for existing customer name to avoid duplicates
+            filter_q = {"customer_name": {"$regex": f'^{re.escape(person)}$', "$options": "i"}, "store_id": store_id}
+            set_on_insert = {
+                "customer_name": person,
+                "store_id": store_id,
+                # Only set phone for primary (best-effort)
+                "customer_phone": order_doc.get("customer_phone", "") if person == name else "",
+            }
+            result = customers_col.find_one_and_update(
+                filter_q,
+                {
+                    "$inc": {"lifetime_spend": per_person, "order_count": 1},
+                    "$set": {"last_order_at": datetime.now(timezone.utc)},
+                    "$setOnInsert": set_on_insert,
+                },
+                upsert=True,
+                return_document=ReturnDocument.AFTER,
+            )
+            print(f"[MongoDB] 🏆 Loyalty: {result.get('customer_name', person)} | lifetime=₹{result.get('lifetime_spend', 0)} | orders={result.get('order_count', 0)}")
+        except Exception as e:
+            print(f"[MongoDB] ⚠️ Failed to update loyalty for {person}: {e}")
 
 
 # ── Public Entry Points ────────────────────────────────────────────────────────

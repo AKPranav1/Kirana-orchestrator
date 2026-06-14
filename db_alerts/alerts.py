@@ -168,10 +168,29 @@ def _get_text(lang: str, key: str, **kwargs) -> str:
 
 
 def _normalize_phone(phone: str) -> str:
-    phone = phone.strip()
-    if not phone.startswith("whatsapp:"):
-        phone = f"whatsapp:{phone}"
-    return phone
+    """
+    Normalize a phone string to Twilio WhatsApp format: "whatsapp:+<digits>".
+    Accepts inputs like:
+      - "+919876..."
+      - "919876..."
+      - "whatsapp:+919876..."
+      - "whatsapp:919876..."
+    Returns a conservative normalized string or falls back to prefixing with whatsapp: if no digits found.
+    """
+    if not phone:
+        return phone
+    s = phone.strip()
+    # strip leading whatsapp: if present
+    if s.lower().startswith("whatsapp:"):
+        s = s[len("whatsapp:") :]
+    # extract digits only
+    digits = "".join(ch for ch in s if ch.isdigit())
+    if not digits:
+        # fallback, keep whatever was provided but ensure whatsapp: prefix
+        if not phone.startswith("whatsapp:"):
+            return f"whatsapp:{phone}"
+        return phone
+    return f"whatsapp:+{digits}"
 
 
 # ── Fix 2: Text-Only Receipt for Standard Orders ─────────────────────────────
