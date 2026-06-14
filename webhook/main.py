@@ -40,12 +40,18 @@ async def webhook(request: Request):
 
     try:
         async with httpx.AsyncClient(timeout=60) as client:
+            # Normalize sender to digits-only so downstream DB lookups match stored phones
+            normalized_phone = "".join(ch for ch in sender if ch.isdigit())
+            if not normalized_phone:
+                normalized_phone = sender
+            print(f"[WEBHOOK] normalized_phone={normalized_phone}")
+
             r = await client.post(
                 INGESTION_URL,
                 json={
                     "payload_type": payload_type,
                     "payload": payload,
-                    "customer_phone": sender,  # FIX: pass sender as customer_phone
+                    "customer_phone": normalized_phone,
                 },
             )
             try:
