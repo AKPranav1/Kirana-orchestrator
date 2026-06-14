@@ -8,6 +8,8 @@ FastAPI service: receives order JSON from Person 1 → MongoDB (pricing + khata 
 
 import os
 import datetime
+from datetime import datetime, timezone 
+import uuid 
 from pathlib import Path
 
 import joblib
@@ -49,7 +51,7 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],   # tighten to your Vite origin in production
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -459,6 +461,21 @@ def create_customer(customer: dict):
     customer_doc.pop("_id", None)
     return {"status": "success", "customer": customer_doc}
 
+# --- Read: All Khata Records ---
+@app.get("/khata", tags=["read"])
+def get_all_khata(store_id: str = "store_001"):
+    """Returns all khata records for the store - used by Customers page"""
+    db = get_db()
+    cursor = db["khata"].find({"store_id": store_id}, {"_id": 0})
+    records = []
+    for doc in cursor:
+        # Convert datetime to string for JSON serialization
+        if "last_updated" in doc:
+            doc["last_updated"] = str(doc["last_updated"])
+        if "last_reminded_at" in doc:
+            doc["last_reminded_at"] = str(doc["last_reminded_at"])
+        records.append(doc)
+    return {"count": len(records), "records": records}
 
 # --- Khata transaction (ad-hoc) --------------------------------------------
 @app.post("/khata/tx", tags=["write"])
