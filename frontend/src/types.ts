@@ -26,6 +26,7 @@ export interface Customer {
   khataBalance: number; // Negative values imply overdue/credit, 0 means settled, Positive means advance
   avgBasket: number;
   lifetimeSpend: number;
+  orderCount?: number;
   lastOrderDate?: string;
 }
 

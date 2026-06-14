@@ -609,7 +609,9 @@ async def process(req: ProcessRequest):
         # conservative single-quantity heuristic to drop hallucinated extra items.
         try:
             numeric_count = len(re.findall(r"\d+(?:\.\d+)?", clean_text))
-            if numeric_count <= 1 and len(flat_order["items"]) > 1:
+            # Only trigger if original text had 1 or fewer numbers AND we have multiple items
+            # This prevents dropping properly parsed multi-item orders
+            if numeric_count == 1 and len(flat_order["items"]) > 1:
                 print(f"[INGESTION] single-quantity heuristic: keeping first of {len(flat_order['items'])} items", flush=True)
                 flat_order["items"] = [flat_order["items"][0]]
         except Exception:

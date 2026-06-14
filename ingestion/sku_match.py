@@ -109,7 +109,7 @@ class SKUMatcher:
                     match = process.extractOne(tok, self.alias_list, scorer=fuzz.WRatio)
                     if match:
                         candidate, score, _ = match
-                        if score >= max(60, cutoff - 10):
+                        if score >= max(50, cutoff - 20):
                             canon, unit = self.aliases[candidate]
                             try:
                                 print(f"[sku_match] rapidfuzz token match: token={tok!r} -> candidate={candidate!r} score={score}", flush=True)

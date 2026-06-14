@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { X, Search, Plus, Minus, Check, ShoppingCart, UserPlus } from 'lucide-react';
+import { X, Search, Plus, Minus, Check, ShoppingCart } from 'lucide-react';
 import { Product, Customer } from '../types';
 import { inventoryService } from '../services/inventory';
 import { customersService } from '../services/customers';
@@ -50,7 +50,6 @@ export default function NewOrderModal({ onClose, onSuccess }: NewOrderModalProps
         return copy;
       }
 
-      // Check stock limit
       if (delta > 0 && next > prod.stockQuantity) {
         alert(`Cannot add more. Only ${prod.stockQuantity} units left in stock.`);
         return prev;
@@ -96,10 +95,10 @@ export default function NewOrderModal({ onClose, onSuccess }: NewOrderModalProps
       });
 
       // 1. Create order
-      await ordersService.createOrder({
+      const order = await ordersService.createOrder({
         customerId: selectedCustomerId || undefined,
         customerName: selectedCustomer ? selectedCustomer.name : 'Walk-in Customer',
-        customerPhone: selectedCustomer ? selectedCustomer.phone : '',   // add this line
+        customerPhone: selectedCustomer ? selectedCustomer.phone : '',
         items,
         totalAmount,
         status: 'Processed',
@@ -112,7 +111,7 @@ export default function NewOrderModal({ onClose, onSuccess }: NewOrderModalProps
           selectedCustomerId,
           'credit',
           totalAmount,
-          `In-store purchase of ${items.map(i => `${i.quantity}x ${i.productName}`).join(', ')}`
+          `In-store purchase (Order #${order.id}) – ${items.map(i => `${i.quantity}x ${i.productName}`).join(', ')}`
         );
       }
 
@@ -157,7 +156,6 @@ export default function NewOrderModal({ onClose, onSuccess }: NewOrderModalProps
           <div className="flex-1 flex flex-col md:flex-row overflow-hidden">
             {/* Catalog list section (Left) */}
             <div className="flex-1 p-5 border-r border-[#1F1F1F] flex flex-col overflow-y-auto">
-              {/* Search */}
               <div className="relative mb-4">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-[#888888]" size={14} />
                 <input 
@@ -169,7 +167,6 @@ export default function NewOrderModal({ onClose, onSuccess }: NewOrderModalProps
                 />
               </div>
 
-              {/* Product Grid */}
               <div className="flex-1 space-y-2 overflow-y-auto pr-1">
                 {filteredProducts.map(p => {
                   const currentQtyInCart = cart[p.id] || 0;
@@ -194,7 +191,6 @@ export default function NewOrderModal({ onClose, onSuccess }: NewOrderModalProps
                         </p>
                       </div>
 
-                      {/* Add controls */}
                       <div className="flex items-center gap-2 flex-shrink-0">
                         {currentQtyInCart > 0 ? (
                           <div className="flex items-center gap-2 border border-[#1F1F1F] bg-[#121212] rounded-sm py-0.5 px-2">
@@ -233,12 +229,11 @@ export default function NewOrderModal({ onClose, onSuccess }: NewOrderModalProps
               </div>
             </div>
 
-            {/* Customer bind and summary section (Right) */}
+            {/* Customer and summary section (Right) */}
             <form onSubmit={handleSubmit} className="w-full md:w-80 p-5 bg-[#0A0A0A] flex flex-col justify-between overflow-y-auto border-t md:border-t-0 border-[#1F1F1F]">
               <div className="space-y-4">
                  <h4 className="text-xs font-semibold text-[#888888] uppercase tracking-wider">Checkout Options</h4>
 
-                {/* Bind to customer */}
                 <div className="space-y-2">
                   <label className="block text-xs font-medium text-[#888888]">Customer (optional)</label>
                   <select 
@@ -246,16 +241,15 @@ export default function NewOrderModal({ onClose, onSuccess }: NewOrderModalProps
                     onChange={(e) => setSelectedCustomerId(e.target.value)}
                     className="w-full bg-[#121212] border border-[#1F1F1F] rounded-sm text-xs p-2 text-white placeholder-[#888888] focus:border-white focus:outline-none cursor-pointer"
                   >
-                        <option value="">Walk-In Customer (No Khata)</option>
+                    <option value="">Walk-In Customer (No Khata)</option>
                     {customers.map(c => (
                       <option key={c.id} value={c.id}>
-                        {c.name} ({c.phone}) - Bal: ₹{c.khataBalance}
+                        {c.name} ({c.phone}) - Bal: ₹{Math.abs(c.khataBalance)} {c.khataBalance < 0 ? '(Due)' : '(Credit)'}
                       </option>
                     ))}
                   </select>
                 </div>
 
-                {/* Payment Options */}
                 {selectedCustomerId && (
                   <div className="space-y-2">
                     <label className="block text-xs font-medium text-[#888888]">Payment Mode</label>
@@ -286,7 +280,6 @@ export default function NewOrderModal({ onClose, onSuccess }: NewOrderModalProps
                   </div>
                 )}
 
-                {/* Cart summary */}
                 <div className="border-t border-[#1F1F1F] pt-4 mt-4 space-y-2">
                   <span className="text-xs font-semibold text-[#888888] uppercase tracking-wider block">Cart Summary</span>
                   <div className="max-h-40 overflow-y-auto space-y-1.5">
@@ -309,8 +302,7 @@ export default function NewOrderModal({ onClose, onSuccess }: NewOrderModalProps
                 </div>
               </div>
 
-              {/* Total and Submit */}
-                 <div className="pt-4 border-t border-[#1F1F1F] mt-4 space-y-3">
+              <div className="pt-4 border-t border-[#1F1F1F] mt-4 space-y-3">
                 <div className="flex justify-between items-baseline">
                   <span className="text-xs text-[#888888]">Grand Total:</span>
                   <span className="text-xl font-bold font-mono text-white">₹{getCartTotal()}</span>

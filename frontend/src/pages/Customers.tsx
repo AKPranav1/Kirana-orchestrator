@@ -4,10 +4,9 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { Users, Search, Plus, Star, AlertTriangle, Send, ScrollText, X } from 'lucide-react';
+import { Users, Search, Plus, Star, AlertTriangle, Send, ScrollText, X, Wallet, History } from 'lucide-react';
 import { Customer } from '../types';
 import { customersService } from '../services/customers';
-import { DB_ALERTS_ORDERS } from '../config';
 
 const formatMoney = (value: number): string => {
   let rounded = Math.round((value || 0) * 100) / 100;
@@ -15,20 +14,22 @@ const formatMoney = (value: number): string => {
   return rounded.toFixed(2);
 };
 
-const safeToFixed = (value: any): string => {
-  const num = typeof value === 'number' && !isNaN(value) ? value : 0;
-  return num.toFixed(2);
-};
-
 interface LedgerEntry {
   id: string;
-  type: 'order' | 'payment' | 'paid_order';
+  type: 'credit' | 'payment';
   date: string;
   description: string;
   amount: number;
   runningBalance: number;
-  items?: any[];
-  status?: string;
+}
+
+interface OrderHistory {
+  id: string;
+  order_id: string;
+  total_amount: number;
+  created_at: string;
+  items: any[];
+  status: string;
 }
 
 export default function Customers() {
@@ -47,6 +48,10 @@ export default function Customers() {
 
   const [selectedCustomerForHistory, setSelectedCustomerForHistory] = useState<Customer | null>(null);
   const [ledgerEntries, setLedgerEntries] = useState<LedgerEntry[]>([]);
+  const [ledgerLoading, setLedgerLoading] = useState(false);
+
+  const [selectedCustomerForOrders, setSelectedCustomerForOrders] = useState<Customer | null>(null);
+  const [customerOrders, setCustomerOrders] = useState<OrderHistory[]>([]);
   const [ordersLoading, setOrdersLoading] = useState(false);
 
   useEffect(() => {
@@ -78,140 +83,76 @@ export default function Customers() {
     }
   };
 
-const handleRecordPayment = async (e: React.FormEvent) => {
-  e.preventDefault();
-  if (!settleCustomer || !settleAmount || parseFloat(settleAmount) <= 0) return;
-  setSettleLoading(true);
-  try {
-    await customersService.addKhataTransaction(
-      settleCustomer.id,
-      'payment',  // This must be 'payment', not 'credit'
-      parseFloat(settleAmount),
-      settleDesc
-    );
-    setSettleAmount("");
-    setSettleCustomer(null);
-    // Reload customers to update khataBalance
-    await loadCustomers();
-    // Also refresh the ledger if it's open for this customer
-    if (selectedCustomerForHistory?.id === settleCustomer.id) {
-      await handleViewHistory(settleCustomer);
-    }
-  } catch (err) {
-    console.error(err);
-    alert("Error processing khata settlement.");
-  } finally {
-    setSettleLoading(false);
-  }
-};
-
-  const extractItems = (order: any): any[] => {
-    if (order.items && Array.isArray(order.items)) {
-      return order.items.map((i: any) => ({
-        productName: i.name || i.productName || i.item_name || 'Unknown',
-        quantity: i.qty || i.quantity || 0,
-        price: i.unit_price || i.price || 0
-      }));
-    }
-    if (order.processed_splits && Array.isArray(order.processed_splits)) {
-      const allItems: any[] = [];
-      for (const split of order.processed_splits) {
-        if (split.items && Array.isArray(split.items)) {
-          allItems.push(...split.items.map((i: any) => ({
-            productName: i.item_name || i.name || 'Unknown',
-            quantity: i.quantity || i.qty || 0,
-            price: i.unit_price || i.price || 0
-          })));
-        }
+  const handleRecordPayment = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!settleCustomer || !settleAmount || parseFloat(settleAmount) <= 0) return;
+    setSettleLoading(true);
+    try {
+      await customersService.addKhataTransaction(
+        settleCustomer.name,
+        'payment',
+        parseFloat(settleAmount),
+        settleDesc
+      );
+      setSettleAmount("");
+      setSettleCustomer(null);
+      await loadCustomers();
+      if (selectedCustomerForHistory?.id === settleCustomer.id) {
+        await handleViewHistory(settleCustomer);
       }
-      return allItems;
+    } catch (err) {
+      console.error(err);
+      alert("Error processing khata settlement.");
+    } finally {
+      setSettleLoading(false);
     }
-    return [];
   };
 
   const handleViewHistory = async (customer: Customer) => {
     setSelectedCustomerForHistory(customer);
-    setOrdersLoading(true);
+    setLedgerLoading(true);
     try {
-      const ordersRes = await fetch(DB_ALERTS_ORDERS);
-      const ordersJson = await ordersRes.json();
-      const rawOrders = ordersJson.orders || [];
-      
-      const allKhataTxns = await customersService.getKhataTransactions();
-      
-      const normalizedName = customer.name.trim().toLowerCase();
-      const normalizedPhone = customer.phone?.trim().toLowerCase() || '';
-      
-      const customerOrders = rawOrders.filter((o: any) => {
-        const orderName = (o.customer_name || o.customerName || '').trim().toLowerCase();
-        const orderPhone = (o.customer_phone || '').trim().toLowerCase();
-        return orderName === normalizedName || 
-               orderName.includes(normalizedName) ||
-               (normalizedPhone && orderPhone === normalizedPhone);
-      });
-      
-      const payments = allKhataTxns.filter(tx => {
-        const txName = (tx.customerName || '').trim().toLowerCase();
-        return tx.type === 'payment' && txName === normalizedName;
-      });
-      
-      const entries: LedgerEntry[] = [];
-      
-      customerOrders.forEach((order: any) => {
-        const items = extractItems(order);
-        const total = order.total_amount || order.totalAmount || 0;
-        const paymentMode = (order.payment_mode || order.paymentMode || 'cash').toLowerCase();
-        const isKhata = paymentMode === 'khata';
-        
-        entries.push({
-          id: `order-${order.order_id || order.id}`,
-          type: isKhata ? 'order' : 'paid_order',
-          date: order.created_at || order.createdAt || new Date().toISOString(),
-          description: `Order #${order.order_id || order.id} (${isKhata ? 'Khata' : 'Paid'})`,
-          amount: isKhata ? total : 0,
-          runningBalance: 0,
-          items: items,
-          status: order.status
-        });
-      });
-      
-      payments.forEach(tx => {
-        entries.push({
-          id: `payment-${tx.id}`,
-          type: 'payment',
-          date: tx.date,
-          description: tx.description,
-          amount: -tx.amount,
-          runningBalance: 0,
-        });
-      });
-      
-      // Sort ascending (oldest first) to calculate running balance
-      entries.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-      
+      const txns = await customersService.getKhataTransactions(customer.name);
+      const sorted = [...txns].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
       let balance = 0;
-      const withBalanceAsc = entries.map(entry => {
-        if (entry.type === 'order') balance += entry.amount;
-        else if (entry.type === 'payment') balance += entry.amount;
-        // paid_order does nothing
-        return { ...entry, runningBalance: Math.max(0, balance) };
+      const entriesWithBalance = sorted.map(t => {
+        const amount = t.type === 'credit' ? t.amount : -t.amount;
+        balance += amount;
+        return {
+          id: t.id,
+          type: t.type,
+          date: t.date,
+          description: t.description,
+          amount: t.amount,
+          runningBalance: balance,
+        };
       });
-      
-      // Reverse for display (latest first)
-      const entriesDisplay = [...withBalanceAsc].reverse();
-      
-      // Final balance is the runningBalance of the last (oldest) entry
-      const finalBalance = withBalanceAsc[withBalanceAsc.length - 1]?.runningBalance || 0;
-      
-      // Update customer's khataBalance in local state (store as negative because customer owes)
-      setCustomers(prev => prev.map(c => 
-        c.id === customer.id ? { ...c, khataBalance: -finalBalance } : c
-      ));
-      
-      setLedgerEntries(entriesDisplay);
+      setLedgerEntries([...entriesWithBalance].reverse());
     } catch (err) {
       console.error(err);
       setLedgerEntries([]);
+    } finally {
+      setLedgerLoading(false);
+    }
+  };
+
+  const handleViewOrderHistory = async (customer: Customer) => {
+    setSelectedCustomerForOrders(customer);
+    setOrdersLoading(true);
+    try {
+      const res = await fetch(`http://localhost:8002/orders`);
+      const data = await res.json();
+      const allOrders = data.orders || [];
+      
+      const filtered = allOrders.filter((order: any) => 
+        order.customer_name === customer.name ||
+        order.customerName === customer.name
+      );
+      
+      setCustomerOrders(filtered);
+    } catch (err) {
+      console.error(err);
+      setCustomerOrders([]);
     } finally {
       setOrdersLoading(false);
     }
@@ -257,16 +198,10 @@ const handleRecordPayment = async (e: React.FormEvent) => {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {filteredCustomers.map(c => {
           const khataOwed = Math.abs(c.khataBalance ?? 0);
-          const isOwed = (c.khataBalance ?? 0) < 0;
+          const isOwed = (c.khataBalance ?? 0) > 0;
           const isZero = khataOwed === 0;
           const isOverdue = isOwed && khataOwed > 1000;
-          const isFrequent = c.status === 'Frequent';
-
-          <p className={`font-semibold font-mono text-xs mt-1 ${
-            isZero ? 'text-green-500' : (isOwed ? 'text-red-400' : 'text-gray-400')
-          }`}>
-            ₹ {formatMoney(khataOwed)}
-          </p>
+          const isFrequent = (c.orderCount || 0) > 5;
 
           return (
             <div key={c.id} className={`bg-[#121212] border rounded-md p-5 flex flex-col justify-between h-full hover:border-[#353534] transition-all relative ${isOverdue ? 'border-red-500/20' : 'border-[#1F1F1F]'}`}>
@@ -275,36 +210,66 @@ const handleRecordPayment = async (e: React.FormEvent) => {
                 <div className="flex items-center gap-3">
                   <div className="w-9 h-9 rounded-full bg-[#1C1B1B] border border-[#1F1F1F] flex items-center justify-center text-white font-semibold text-sm">{c.name.charAt(0)}</div>
                   <div>
-                    <button onClick={() => handleViewHistory(c)} className="text-left hover:underline"><h4 className="text-xs font-bold text-white cursor-pointer">{c.name}</h4></button>
+                    <button onClick={() => handleViewHistory(c)} className="text-left hover:underline">
+                      <h4 className="text-xs font-bold text-white cursor-pointer">{c.name}</h4>
+                    </button>
                     <p className="text-[10px] text-[#888888] mt-0.5">{c.phone}</p>
                   </div>
                 </div>
                 {isFrequent && <span className="bg-[#10B981]/15 text-[#4edea3] text-[10px] uppercase font-bold py-0.5 px-2 rounded-sm flex items-center gap-1"><Star size={10} /> Frequent</span>}
                 {isOverdue && <span className="bg-red-400/10 text-red-400 text-[10px] uppercase font-bold py-0.5 px-2 rounded-sm flex items-center gap-1"><AlertTriangle size={10} /> Overdue</span>}
               </div>
+              
               <div className="grid grid-cols-2 gap-3 mb-5 text-xs">
                 <div className="p-2.5 rounded-sm border bg-[#0F0F0F] border-[#1F1F1F]">
                   <p className="text-[9px] text-[#888888] uppercase font-bold">Khata Balance</p>
-                  <p className={`font-semibold font-mono text-xs mt-1 ${isOwed ? 'text-red-400' : 'text-gray-400'}`}>₹ {formatMoney(khataOwed)}</p>
+                  <p className={`font-semibold font-mono text-xs mt-1 ${isOwed ? 'text-red-400' : 'text-green-500'}`}>
+                    ₹ {formatMoney(khataOwed)}
+                  </p>
+                </div>
+                <div className="p-2.5 rounded-sm border bg-[#0F0F0F] border-[#1F1F1F]">
+                  <p className="text-[9px] text-[#888888] uppercase font-bold">Total Orders</p>
+                  <p className="font-semibold text-white font-mono text-xs mt-1">{c.orderCount || 0}</p>
                 </div>
                 <div className="p-2.5 rounded-sm border bg-[#0F0F0F] border-[#1F1F1F]">
                   <p className="text-[9px] text-[#888888] uppercase font-bold">Avg Basket</p>
                   <p className="font-semibold text-white font-mono text-xs mt-1">₹ {formatMoney(c.avgBasket ?? 0)}</p>
                 </div>
-                <div className="col-span-2 p-2.5 rounded-sm border bg-[#0F0F0F] border-[#1F1F1F] flex justify-between">
-                  <p className="text-[9px] text-[#888888] uppercase font-bold">LIFETIME REVENUE</p>
-                  <p className="font-semibold text-white font-mono">₹ {formatMoney(c.lifetimeSpend ?? 0)}</p>
+                <div className="p-2.5 rounded-sm border bg-[#0F0F0F] border-[#1F1F1F]">
+                  <p className="text-[9px] text-[#888888] uppercase font-bold">Lifetime Revenue</p>
+                  <p className="font-semibold text-[#4edea3] font-mono text-xs mt-1">₹ {formatMoney(c.lifetimeSpend ?? 0)}</p>
                 </div>
               </div>
+              
               <div className="flex gap-2">
-                <button onClick={() => { navigator.clipboard.writeText(`Namaste ${c.name}, please settle Khata balance ₹${khataOwed}.`); alert("WhatsApp message copied!"); }} className="flex-1 bg-transparent border border-[#1F1F1F] hover:border-white text-xs font-semibold py-1.5 rounded-sm text-[#888888] hover:text-white flex items-center justify-center gap-1"><Send size={12} /> WhatsApp</button>
-                <button onClick={() => setSettleCustomer(c)} className="flex-1 bg-[#1C1B1B] hover:bg-white hover:text-black border border-[#1F1F1F] text-xs font-semibold py-1.5 rounded-sm text-white flex items-center justify-center gap-1"><ScrollText size={12} /> Settle Khata</button>
+                <button 
+                  onClick={() => { 
+                    navigator.clipboard.writeText(`Namaste ${c.name}, please settle Khata balance ₹${khataOwed}.`); 
+                    alert("WhatsApp message copied!"); 
+                  }} 
+                  className="flex-1 bg-transparent border border-[#1F1F1F] hover:border-white text-xs font-semibold py-1.5 rounded-sm text-[#888888] hover:text-white flex items-center justify-center gap-1"
+                >
+                  <Send size={12} /> WhatsApp
+                </button>
+                <button 
+                  onClick={() => handleViewOrderHistory(c)} 
+                  className="flex-1 bg-[#1C1B1B] hover:bg-blue-500 hover:text-white border border-[#1F1F1F] text-xs font-semibold py-1.5 rounded-sm text-white flex items-center justify-center gap-1"
+                >
+                  <History size={12} /> Orders
+                </button>
+                <button 
+                  onClick={() => setSettleCustomer(c)} 
+                  className="flex-1 bg-[#1C1B1B] hover:bg-white hover:text-black border border-[#1F1F1F] text-xs font-semibold py-1.5 rounded-sm text-white flex items-center justify-center gap-1"
+                >
+                  <Wallet size={12} /> Settle
+                </button>
               </div>
             </div>
           );
         })}
       </div>
 
+      {/* Settle Khata Modal */}
       {settleCustomer && (
         <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
           <form onSubmit={handleRecordPayment} className="bg-[#121212] border border-[#1F1F1F] rounded-md p-5 w-full max-w-sm space-y-4">
@@ -360,52 +325,36 @@ const handleRecordPayment = async (e: React.FormEvent) => {
         </div>
       )}
 
+      {/* Khata Ledger Modal */}
       {selectedCustomerForHistory && (
         <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
           <div className="bg-[#121212] border border-[#1F1F1F] rounded-md w-full max-w-4xl max-h-[85vh] flex flex-col overflow-hidden">
             <div className="p-4 border-b border-[#1F1F1F] flex justify-between items-center bg-[#161616]">
-              <div><h3 className="text-sm font-semibold text-white">Ledger: {selectedCustomerForHistory.name}</h3><p className="text-[10px] text-[#888888]">{selectedCustomerForHistory.phone}</p></div>
+              <div>
+                <h3 className="text-sm font-semibold text-white">Khata Ledger: {selectedCustomerForHistory.name}</h3>
+                <p className="text-[10px] text-[#888888]">{selectedCustomerForHistory.phone}</p>
+              </div>
               <button onClick={() => setSelectedCustomerForHistory(null)} className="text-[#888888] hover:text-white"><X size={18} /></button>
             </div>
             <div className="flex-1 overflow-y-auto p-4">
-              {ordersLoading ? <p className="text-xs text-center text-[#888888] py-10">Loading ledger...</p> : ledgerEntries.length === 0 ? <p className="text-xs text-center text-[#888888] py-10">No transactions found.</p> : (
+              {ledgerLoading ? <p className="text-xs text-center text-[#888888] py-10">Loading ledger...</p> : ledgerEntries.length === 0 ? <p className="text-xs text-center text-[#888888] py-10">No transactions found.</p> : (
                 <div className="space-y-3">
                   <div className="grid grid-cols-12 gap-2 text-[10px] font-bold text-[#888888] uppercase border-b border-[#1F1F1F] pb-2">
                     <div className="col-span-3">Date</div><div className="col-span-5">Description</div><div className="col-span-2 text-right">Amount</div><div className="col-span-2 text-right">Balance</div>
                   </div>
                   {ledgerEntries.map(entry => {
-                    const isPaidOrder = entry.type === 'paid_order';
-                    const isKhataOrder = entry.type === 'order';
-                    const isPayment = entry.type === 'payment';
-                    let amountDisplay = '';
-                    let amountClass = 'text-white';
-                    if (isPaidOrder) {
-                      amountDisplay = '₹0.00';
-                    } else if (isKhataOrder) {
-                      amountDisplay = `+ ₹${safeToFixed(entry.amount)}`;
-                      amountClass = 'text-red-400';
-                    } else {
-                      amountDisplay = `- ₹${safeToFixed(-entry.amount)}`;
-                      amountClass = 'text-green-500';
-                    }
+                    const isCredit = entry.type === 'credit';
+                    const amountDisplay = isCredit ? `+ ₹${formatMoney(entry.amount)}` : `- ₹${formatMoney(entry.amount)}`;
+                    const amountClass = isCredit ? 'text-red-400' : 'text-green-500';
                     const balanceColor = entry.runningBalance === 0 ? 'text-green-500' : 'text-red-500';
                     return (
                       <div key={entry.id} className="grid grid-cols-12 gap-2 text-xs border-b border-[#1F1F1F] py-2">
                         <div className="col-span-3 text-[#888888]">{new Date(entry.date).toLocaleString()}</div>
                         <div className="col-span-5">
-                          {entry.type !== 'payment' ? (
-                            <>
-                              {entry.items && entry.items.length > 0 ? entry.items.map((item, idx) => (
-                                <div key={idx}>{item.productName} x{item.quantity} @ ₹{safeToFixed(item.price)}</div>
-                              )) : <span className="text-[#888888]">No items recorded</span>}
-                              <div className="text-[9px] text-[#888888] font-mono mt-0.5">{entry.description}</div>
-                            </>
-                          ) : (
-                            <div className="text-white">Payment: {entry.description}</div>
-                          )}
+                          {entry.type === 'payment' ? 'Payment: ' : 'Credit: '}{entry.description}
                         </div>
                         <div className={`col-span-2 text-right font-mono ${amountClass}`}>{amountDisplay}</div>
-                        <div className={`col-span-2 text-right font-mono font-bold ${balanceColor}`}>₹{safeToFixed(entry.runningBalance)}</div>
+                        <div className={`col-span-2 text-right font-mono font-bold ${balanceColor}`}>₹{formatMoney(entry.runningBalance)}</div>
                       </div>
                     );
                   })}
@@ -415,6 +364,55 @@ const handleRecordPayment = async (e: React.FormEvent) => {
                       ₹{formatMoney(Math.abs(selectedCustomerForHistory.khataBalance ?? 0))}
                     </div>
                   </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Order History Modal */}
+      {selectedCustomerForOrders && (
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
+          <div className="bg-[#121212] border border-[#1F1F1F] rounded-md w-full max-w-4xl max-h-[85vh] flex flex-col overflow-hidden">
+            <div className="p-4 border-b border-[#1F1F1F] flex justify-between items-center bg-[#161616]">
+              <div>
+                <h3 className="text-sm font-semibold text-white">Order History: {selectedCustomerForOrders.name}</h3>
+                <p className="text-[10px] text-[#888888]">
+                  Total Orders: {selectedCustomerForOrders.orderCount || 0} | 
+                  Total Spent: ₹{formatMoney(selectedCustomerForOrders.lifetimeSpend || 0)} | 
+                  Avg Order: ₹{formatMoney(selectedCustomerForOrders.avgBasket || 0)}
+                </p>
+              </div>
+              <button onClick={() => setSelectedCustomerForOrders(null)} className="text-[#888888] hover:text-white"><X size={18} /></button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-4">
+              {ordersLoading ? (
+                <p className="text-xs text-center text-[#888888] py-10">Loading orders...</p>
+              ) : customerOrders.length === 0 ? (
+                <p className="text-xs text-center text-[#888888] py-10">No orders found.</p>
+              ) : (
+                <div className="space-y-3">
+                  {customerOrders.map((order, idx) => (
+                    <div key={idx} className="bg-[#0F0F0F] border border-[#1F1F1F] rounded-md p-3 hover:border-[#353534] transition-all">
+                      <div className="flex justify-between items-start mb-2">
+                        <div>
+                          <span className="text-[10px] text-[#888888]">Order #{order.order_id || order.id}</span>
+                          <div className="text-sm font-bold text-white font-mono mt-1">₹{formatMoney(order.total_amount)}</div>
+                        </div>
+                        <span className="text-[10px] text-[#888888]">{new Date(order.created_at).toLocaleDateString()}</span>
+                      </div>
+                      <div className="text-[10px] text-[#888888] mt-2">
+                        Items: {(order.items || []).map((i: any, idx2: number) => (
+                          <span key={idx2}>
+                            {idx2 > 0 && ', '}
+                            {i.qty || i.quantity}x {i.name || i.productName}
+                          </span>
+                        ))}
+                      </div>
+                      <div className="text-[10px] text-[#4edea3] mt-2">Status: {order.status || 'Completed'}</div>
+                    </div>
+                  ))}
                 </div>
               )}
             </div>

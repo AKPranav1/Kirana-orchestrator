@@ -33,12 +33,14 @@ SPLIT_KEYWORDS = {
 }
 
 def _is_split_item(raw_item: RawItem) -> bool:
-    """Return True if the raw item name looks like a split instruction."""
-    name_lower = raw_item.name.lower()
-    has_kw = any(kw in name_lower for kw in SPLIT_KEYWORDS)
+    name_lower = raw_item.name.lower().strip()
     has_digit = bool(re.search(r"\d", name_lower))
-    is_short_command = len(name_lower) <= 3 and name_lower in {"do", "ko", "de", "dena"}
-    return (has_kw and not has_digit) or is_short_command
+    if has_digit:
+        return False
+    # whole-word match only — prevents "potato" matching "o"/"te"
+    has_kw = any(re.search(rf"\b{re.escape(kw)}\b", name_lower) for kw in SPLIT_KEYWORDS)
+    is_short_command = name_lower in {"do", "ko", "de", "dena"}
+    return has_kw or is_short_command
 
 def _clean_raw_items(splits: List[BuyerSplit]) -> List[BuyerSplit]:
     """Remove raw items that are actually split instructions."""
