@@ -34,12 +34,8 @@ export default function Sidebar({ activeTab, setActiveTab, onNewOrder }: Sidebar
     { id: 'customers', name: 'Customers', icon: Users },
     { id: 'khata', name: 'Credit Book', icon: Wallet },
     { id: 'inventory', name: 'Products', icon: Package },
-    { id: 'purchase_orders', name: 'Orders to Supplier', icon: ShoppingBag },
-    { id: 'suppliers', name: 'Wholesalers', icon: Truck },
     { id: 'analytics', name: 'Sales Insights', icon: BarChart3 },
-    { id: 'forecasts', name: 'Stock Suggestions', icon: TrendingUp },
-    { id: 'reports', name: 'Reports', icon: FileText },
-    { id: 'settings', name: 'Settings', icon: Settings },
+    { id: 'forecasts', name: 'Stock Suggestions', icon: TrendingUp }
   ];
 
   return (

@@ -22,6 +22,8 @@ import {
 } from 'lucide-react';
 import { dashboardService } from '../services/dashboard';
 import { ordersService } from '../services/orders';
+import { customersService } from '../services/customers'; 
+import { inventoryService } from '../services/inventory';
 import { DashboardMetrics, Order } from '../types';
 import MetricCard from '../components/MetricCard';
 // Recent activity will be populated from live events; no local mocks
@@ -31,13 +33,35 @@ interface DashboardProps {
   onOpenNewOrder: () => void;
 }
 
+interface Insight {
+  id: string;
+  title: string;
+  body: string;
+  ctaLabel: string;
+  ctaColor: string;
+  target: string;
+}
+
+const formatRelativeTime = (dateStr: string): string => {
+  if (!dateStr) return '';
+  const date = new Date(dateStr);
+  if (isNaN(date.getTime())) return '';
+  const diffMs = Date.now() - date.getTime();
+  const diffMin = Math.floor(diffMs / 60000);
+  if (diffMin < 1) return 'Just now';
+  if (diffMin < 60) return `${diffMin}m ago`;
+  const diffHr = Math.floor(diffMin / 60);
+  if (diffHr < 24) return `${diffHr}h ago`;
+  const diffDay = Math.floor(diffHr / 24);
+  return `${diffDay}d ago`;
+};
+
 export default function Dashboard({ onNavigate, onOpenNewOrder }: DashboardProps) {
   const [metrics, setMetrics] = useState<DashboardMetrics | null>(null);
+  const [creditOutstanding, setCreditOutstanding] = useState<number>(0);
+  const [insights, setInsights] = useState<Insight[]>([]);
   const [loading, setLoading] = useState(true);
   const [activities, setActivities] = useState<any[]>([]);
-  
-  // WhatsApp Simulated Parsing states
-  const [whatsappText, setWhatsappText] = useState("Aashirvaad Atta 2, Amul Milk 5, Tata Salt 1, please send fast to Rajesh Kumar");
   const [parseLoading, setParseLoading] = useState(false);
   const [parseSuccess, setParseSuccess] = useState<any>(null);
 
@@ -48,44 +72,104 @@ export default function Dashboard({ onNavigate, onOpenNewOrder }: DashboardProps
   const loadDashboard = async () => {
     setLoading(true);
     try {
-      const data = await dashboardService.getDashboard();
+      const [data, customers, products, orders] = await Promise.all([
+        dashboardService.getDashboard(),
+        customersService.getCustomers(),
+        inventoryService.getInventory(),
+        ordersService.getOrders(),
+      ]);
+
       setMetrics(data);
+
+      // Credit Outstanding — same logic as the Customer Directory, so the
+      // two pages always agree.
+      const totalOutstanding = customers.reduce(
+        (sum, c) => (c.khataBalance < 0 ? sum + Math.abs(c.khataBalance) : sum),
+        0
+      );
+      setCreditOutstanding(totalOutstanding);
+
+      // --- Active AI Insights, built from real data ---
+      const newInsights: Insight[] = [];
+
+      const lowStockProducts = [...products]
+        .filter((p: any) => (p.stockQuantity ?? p.stock_quantity ?? 0) < 5)
+        .sort((a: any, b: any) => (a.stockQuantity ?? a.stock_quantity ?? 0) - (b.stockQuantity ?? b.stock_quantity ?? 0));
+
+      if (lowStockProducts.length > 0) {
+        const top: any = lowStockProducts[0];
+        const stock = top.stockQuantity ?? top.stock_quantity ?? 0;
+        const pname = top.name ?? top.product_name ?? 'A product';
+        const others = lowStockProducts.length - 1;
+        newInsights.push({
+          id: 'low-stock',
+          title: `${pname} stock running low`,
+          body: `Only ${stock} unit${stock === 1 ? '' : 's'} left.${others > 0 ? ` ${others} other item${others === 1 ? '' : 's'} also below the reorder threshold.` : ''}`,
+          ctaLabel: 'View stock suggestions',
+          ctaColor: 'text-[#4edea3]',
+          target: 'forecasts',
+        });
+      } else {
+        newInsights.push({
+          id: 'low-stock',
+          title: 'Stock levels look healthy',
+          body: 'No products are currently below the low-stock threshold.',
+          ctaLabel: 'View products',
+          ctaColor: 'text-[#4edea3]',
+          target: 'inventory',
+        });
+      }
+
+      const overdueCustomers = customers
+        .filter((c) => c.khataBalance < 0)
+        .sort((a, b) => a.khataBalance - b.khataBalance);
+
+      if (overdueCustomers.length > 0) {
+        const top = overdueCustomers[0];
+        const amount = Math.abs(top.khataBalance);
+        const others = overdueCustomers.length - 1;
+        newInsights.push({
+          id: 'khata-overdue',
+          title: `${top.name} Khata balance outstanding`,
+          body: `Outstanding credit balance of ₹${amount.toLocaleString('en-IN', { maximumFractionDigits: 2 })} is pending recovery.${others > 0 ? ` ${others} other customer${others === 1 ? '' : 's'} also have open balances.` : ''}`,
+          ctaLabel: 'Ping WhatsApp reminder',
+          ctaColor: 'text-red-400',
+          target: 'customers',
+        });
+      } else {
+        newInsights.push({
+          id: 'khata-overdue',
+          title: 'No overdue credit balances',
+          body: 'All customer Khata balances are currently settled.',
+          ctaLabel: 'View credit book',
+          ctaColor: 'text-[#4edea3]',
+          target: 'khata',
+        });
+      }
+
+      setInsights(newInsights);
+
+      // --- Recent Activity Feed, from real recent orders ---
+      const recentActivities = orders.slice(0, 6).map((o: any) => {
+        const orderId = o.id ?? o.order_id ?? '';
+        const name = o.customerName ?? o.customer_name ?? o.customer ?? 'Unknown Customer';
+        const amount = o.totalAmount ?? o.total_amount ?? o.bill_amount ?? 0;
+        const status = o.status ?? 'Processed';
+        const createdAt = o.createdAt ?? o.created_at ?? '';
+        return {
+          id: `order-${orderId}`,
+          type: 'order',
+          description: `Order #${orderId} — ₹${Number(amount).toLocaleString('en-IN')}`,
+          timeLabel: formatRelativeTime(createdAt),
+          user: name,
+          status,
+        };
+      });
+      setActivities(recentActivities);
     } catch (err) {
       console.error(err);
     } finally {
       setLoading(false);
-    }
-  };
-
-  const handleExtractOrder = async () => {
-    if (!whatsappText.trim()) return;
-    setParseLoading(true);
-    setParseSuccess(null);
-    try {
-      const res = await ordersService.extractOrderFromWhatsApp(whatsappText);
-      if (res.order) {
-        setParseSuccess(res.order);
-        // Prepend to activities
-        setActivities(prev => [
-          {
-            id: `act-${Date.now()}`,
-            type: "whatsapp_order",
-            description: `Order #${res.order!.id} extracted from WhatsApp`,
-            timeLabel: "Just now",
-            user: res.order!.customerName,
-            status: "Processed"
-          },
-          ...prev
-        ]);
-        // Update metrics
-        loadDashboard();
-      } else {
-        alert(res.error || "No matching items found.");
-      }
-    } catch (err) {
-      alert("Error parsing WhatsApp message");
-    } finally {
-      setParseLoading(false);
     }
   };
 
@@ -117,23 +201,23 @@ export default function Dashboard({ onNavigate, onOpenNewOrder }: DashboardProps
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
         <MetricCard 
             title="Today's Sales" 
-          value={`₹${metrics?.todaysRevenue?.toLocaleString('en-IN') || '12,450'}`} 
+          value={`₹${(metrics?.todaysRevenue ?? 0).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`} 
           icon={TrendingUp} 
           iconColor="text-[#10B981]"
-          trend="+14.2% demand"
+          trend={(metrics?.todaysOrdersCount ?? 0) > 0 ? `${metrics?.todaysOrdersCount} orders so far` : "No sales yet today"}
           trendDirection="up"
           loading={loading}
         />
         <MetricCard 
             title="Orders Today" 
-          value={metrics?.todaysOrdersCount || '42'} 
+          value={metrics?.todaysOrdersCount ?? 0} 
           icon={ShoppingBag} 
-          trend="WhatsApp engine busy"
+          trend={(metrics?.todaysOrdersCount ?? 0) > 0 ? "WhatsApp engine busy" : "No orders yet today"}
           loading={loading}
         />
         <MetricCard 
             title="Credit Outstanding" 
-          value={`₹${metrics?.outstandingKhata?.toLocaleString('en-IN') || '8,200'}`} 
+          value={`₹${creditOutstanding.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`} 
           icon={Wallet} 
           iconColor="text-red-400"
           trend="Needs recovery action"
@@ -142,147 +226,26 @@ export default function Dashboard({ onNavigate, onOpenNewOrder }: DashboardProps
         />
         <MetricCard 
             title="Low Stock" 
-          value={metrics?.lowStockItemsCount ?? 3} 
+          value={metrics?.lowStockItemsCount ?? 0} 
           icon={AlertTriangle} 
           iconColor="text-red-400"
-          trend="ML replenishment ready"
+          trend={(metrics?.lowStockItemsCount ?? 0) > 0 ? "ML replenishment ready" : "All stock levels healthy"}
           loading={loading}
         />
         <MetricCard 
             title="Pending Deliveries" 
-          value={metrics?.pendingDeliveriesCount || 5} 
+          value={metrics?.pendingDeliveriesCount ?? 0} 
           icon={Truck} 
-          trend="3 In Transit"
+          trend={(metrics?.pendingDeliveriesCount ?? 0) > 0 ? `${metrics?.pendingDeliveriesCount} in transit` : "No deliveries pending"}
           loading={loading}
         />
         <MetricCard 
             title="Amount Due to Wholesalers" 
-          value={`₹${metrics?.pendingSupplierPay?.toLocaleString('en-IN') || '15,000'}`} 
+          value={`₹${(metrics?.pendingSupplierPay ?? 0).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`} 
           icon={CreditCard} 
-          trend="Awaiting approval"
+          trend={(metrics?.pendingSupplierPay ?? 0) > 0 ? "Awaiting approval" : "All settled"}
           loading={loading}
         />
-      </div>
-
-      {/* Center layout split */}
-      <div className="grid grid-cols-1 lg:grid-cols-1 home-view gap-6">
-        <div className="flex flex-col lg:flex-row gap-6">
-          {/* WhatsApp order pilot (Left) */}
-          <div className="flex-1 bg-[#121212] border border-[#1F1F1F] rounded-lg p-5 flex flex-col justify-between">
-            <div>
-              <div className="flex items-center gap-2.5 mb-3 border-b border-[#1F1F1F] pb-3">
-                <span className="p-1 px-1.5 bg-[#25D366]/10 text-[#25D366] rounded-sm text-xs font-semibold flex items-center gap-1">
-                  <MessageSquare size={14} /> LIVE ORDERS
-                </span>
-                <h3 className="text-sm font-semibold uppercase tracking-wider text-white">WhatsApp order reader</h3>
-              </div>
-              <p className="text-xs text-[#888888] mb-4">
-                Paste a WhatsApp message below and the app will try to make a sale from it.
-              </p>
-
-              {/* Text area input code */}
-              <div className="space-y-3">
-                 <label className="block text-[11px] font-semibold text-[#888888] uppercase tracking-wider">Paste WhatsApp message</label>
-                <textarea 
-                  value={whatsappText}
-                  onChange={(e) => setWhatsappText(e.target.value)}
-                  placeholder="e.g., 2 packets of atta and 5 bags milk please send fast from Aarav Malhotra"
-                  className="w-full bg-[#0F0F0F] border border-[#1F1F1F] rounded-sm text-xs p-3 text-white placeholder-[#888888] focus:border-white focus:outline-none min-h-[100px] resize-none"
-                />
-              </div>
-            </div>
-
-            <div className="mt-4 pt-3 border-t border-[#1F1F1F] flex flex-col sm:flex-row justify-between items-center gap-3">
-               <span className="text-[10px] text-[#888888] flex items-center gap-1 font-mono">
-                 AI: Read messages
-               </span>
-                <button 
-                  onClick={handleExtractOrder}
-                  disabled={parseLoading}
-                  className="w-full sm:w-auto px-4 py-2 bg-[#10B981] hover:bg-[#4edea3] text-black font-semibold text-xs rounded-sm flex items-center justify-center gap-1 transition-all cursor-pointer disabled:opacity-50"
-                >
-                  {parseLoading ? "Processing..." : "Create order from WhatsApp"}
-                  <ArrowRight size={14} />
-                </button>
-            </div>
-
-            {/* Parse Result Feedback */}
-            {parseSuccess && (
-              <div className="mt-4 p-3 bg-[#162D20] border border-[#214F33] rounded-sm animate-pulse-soft">
-                  <p className="text-xs font-semibold text-[#4edea3] flex items-center gap-1">
-                    <CheckCircle size={14} /> Order #{parseSuccess.id} created
-                  </p>
-                <div className="mt-2 text-[11px] text-[#888888] space-y-1 font-mono">
-                  <div>Customer: <b className="text-white">{parseSuccess.customerName}</b></div>
-                  <div>Items: {parseSuccess.items.map((i: any) => `${i.quantity}x ${i.productName}`).join(', ')}</div>
-                  <div>Total Cost Charged: <b className="text-white">₹{parseSuccess.totalAmount}</b></div>
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Store Health & AI Insights (Right) */}
-          <div className="w-full lg:w-96 flex flex-col gap-6">
-            {/* Health Score Circular dial wrapper */}
-            <div className="bg-[#121212] border border-[#1F1F1F] rounded-lg p-5 flex flex-col items-center justify-center relative overflow-hidden h-52">
-              <span className="text-[10px] font-semibold text-[#888888] uppercase tracking-wider absolute top-4 left-4 block">Store Health Indicator</span>
-              <div className="relative w-28 h-28 mt-4 flex items-center justify-center">
-                <svg className="w-full h-full transform -rotate-90" viewBox="0 0 100 100">
-                  <circle cx="50" cy="50" r="42" fill="none" stroke="#1F1F1F" strokeWidth="5"></circle>
-                  <circle 
-                    cx="50" 
-                    cy="50" 
-                    r="42" 
-                    fill="none" 
-                    stroke="#10B981" 
-                    strokeWidth="5" 
-                    strokeDasharray="263.8" 
-                    strokeDashoffset="15" // ~94%
-                    strokeLinecap="round"
-                    className="transition-all duration-1000"
-                  ></circle>
-                </svg>
-                <div className="absolute inset-0 flex flex-col items-center justify-center">
-                  <span className="text-2xl font-bold font-mono text-white">94%</span>
-                </div>
-              </div>
-              <p className="text-[10px] font-bold text-[#4edea3] uppercase tracking-wide mt-3 flex items-center gap-1">
-                <CheckCircle size={12} /> Operational Efficiency High
-              </p>
-            </div>
-
-            {/* AI Insights list card */}
-            <div className="bg-[#121212] border border-[#1F1F1F] rounded-lg p-5 flex-1 select-none">
-              <div className="flex items-center gap-2 mb-3 pb-3 border-b border-[#1F1F1F]">
-                <Sparkles size={14} className="text-[#4edea3]" />
-                <h3 className="text-xs font-semibold uppercase tracking-wider text-white">Active AI Insights</h3>
-              </div>
-              <div className="space-y-3">
-                <div className="p-3 bg-[#1A1A1A] border border-[#1F1F1F] rounded-sm text-xs">
-                  <div className="font-semibold text-white">Amul Milk stock falling critical</div>
-                  <p className="text-[11px] text-[#888888] mt-1">Under 4 units left. Out-of-stock expected in 4 hours due to fast weekend checkout velocity.</p>
-                  <button 
-                    onClick={() => onNavigate('forecasts')}
-                    className="mt-2 text-[10px] text-[#4edea3] hover:underline hover:text-white font-semibold flex items-center gap-1 cursor-pointer"
-                  >
-                    View ML recommendation <ArrowRight size={10} />
-                  </button>
-                </div>
-
-                <div className="p-3 bg-[#1A1A1A] border border-[#1F1F1F] rounded-sm text-xs font-sans">
-                  <div className="font-semibold text-white">Anjali Sharma Khata overdue alert</div>
-                  <p className="text-[11px] text-[#888888] mt-1">Outstanding credit balance of ₹4,250 remains uncollected for more than 15 days.</p>
-                  <button 
-                    onClick={() => onNavigate('customers')}
-                    className="mt-2 text-[10px] text-red-400 hover:underline hover:text-white font-semibold flex items-center gap-1 cursor-pointer"
-                  >
-                    Ping WhatsApp reminder <ArrowRight size={10} />
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
       </div>
 
       {/* Recent Activity Section */}

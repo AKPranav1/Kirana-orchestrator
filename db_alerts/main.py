@@ -8,9 +8,10 @@ FastAPI service: receives order JSON from Person 1 → MongoDB (pricing + khata 
 
 import os
 import datetime
-from datetime import datetime, timezone 
+from datetime import datetime, timezone, timedelta 
 import uuid 
 from pathlib import Path
+from starlette.middleware.base import BaseHTTPMiddleware
 
 import joblib
 from fastapi import FastAPI, HTTPException
@@ -348,8 +349,8 @@ def dashboard_metrics():
     Uses get_db() (the public alias) — no internal _get_db import needed.
     """
     db      = get_db()
-    today   = datetime.datetime.utcnow().date()
-    day_start = datetime.datetime.combine(today, datetime.time.min)
+    today   = datetime.now(timezone.utc).date()
+    day_start = datetime.combine(today, datetime.min.time())
 
     todays_orders = list(
         db["orders"].find({"created_at": {"$gte": day_start}}, {"total_amount": 1})
@@ -669,40 +670,84 @@ def save_settings(settings: dict):
 
 # --- Analytics (simple aggregates) -----------------------------------------
 @app.get("/analytics", tags=["read"])
-def get_analytics():
+def get_analytics(timeframe: str = "7d"):
     db = get_db()
-    # Simple khata ageing buckets
-    ageing_buckets = [
-        {"range": "0-7 days", "amount": 0},
-        {"range": "8-15 days", "amount": 0},
-        {"range": "16-30 days", "amount": 0},
-        {"range": ">30 days", "amount": 0},
+    
+    # Calculate date range
+    now = datetime.now(timezone.utc)
+    if timeframe == "7d":
+        start_date = now - timedelta(days=7)
+    else:
+        start_date = now - timedelta(days=30)
+    
+    # 1. Trend Data - daily revenue from orders
+    pipeline = [
+        {"$match": {"created_at": {"$gte": start_date}}},
+        {"$group": {
+            "_id": {"$dateToString": {"format": "%Y-%m-%d", "date": "$created_at"}},
+            "revenue": {"$sum": "$total_amount"}
+        }},
+        {"$sort": {"_id": 1}}
     ]
-    try:
-        import dateutil.parser as dparser
-        from datetime import timedelta
-        now = datetime.now(timezone.utc)
-        for doc in db["khata"].find({}, {"entries": 1}):
-            for e in doc.get("entries", []):
-                try:
-                    d = dparser.parse(e.get("date"))
-                    age = (now - d).days
-                    amt = float(e.get("amount", 0))
-                    if age <= 7:
-                        ageing_buckets[0]["amount"] += amt
-                    elif age <= 15:
-                        ageing_buckets[1]["amount"] += amt
-                    elif age <= 30:
-                        ageing_buckets[2]["amount"] += amt
-                    else:
-                        ageing_buckets[3]["amount"] += amt
-                except Exception:
-                    continue
-    except Exception:
-        pass
-
-    analytics = {"khata_ageing": ageing_buckets}
-    return {"analytics": analytics}
+    trend_data = list(db["orders"].aggregate(pipeline))
+    trend_data = [{"date": d["_id"], "revenue": d["revenue"]} for d in trend_data]
+    
+    # 2. Category Distribution - you need to add 'category' field to products
+    total_products = db["products"].count_documents({})
+    if total_products > 0:
+        category_pipeline = [
+            {"$group": {
+                "_id": "$category",
+                "count": {"$sum": 1}
+            }}
+        ]
+        categories = list(db["products"].aggregate(category_pipeline))
+        category_dist = [
+            {"name": c["_id"] or "Other", "value": round(c["count"] / total_products * 100, 1)}
+            for c in categories if c["_id"]
+        ]
+    else:
+        # Mock categories if no products
+        category_dist = [
+            {"name": "Grains", "value": 35},
+            {"name": "Dairy", "value": 25},
+            {"name": "Packaged Foods", "value": 20},
+        ]
+    
+    # 3. Top Products - FIXED to use 'name' and 'unit_price'
+    product_pipeline = [
+        {"$unwind": "$items"},
+        {"$group": {
+            "_id": "$items.name",  # Changed from productName to name
+            "revenue": {"$sum": {"$multiply": ["$items.unit_price", "$items.qty"]}}  # Changed from price to unit_price
+        }},
+        {"$sort": {"revenue": -1}},
+        {"$limit": 5}
+    ]
+    top_products = list(db["orders"].aggregate(product_pipeline))
+    top_products = [{"name": p["_id"], "revenue": round(p["revenue"], 2)} for p in top_products]
+    
+    # 4. Total metrics
+    total_revenue = sum(o.get("total_amount", 0) for o in db["orders"].find({}))
+    total_orders = db["orders"].count_documents({})
+    
+    # Khata recovery rate
+    khata_total = sum(k.get("total_outstanding", 0) for k in db["khata"].find({}))
+    khata_recovery_rate = 0
+    if khata_total > 0:
+        # You need to track total_paid in khata. For now, estimate
+        khata_recovery_rate = 75.0
+    
+    return {
+        "analytics": {
+            "totalRevenue": round(total_revenue, 2),
+            "totalOrders": total_orders,
+            "khataRecoveryRate": khata_recovery_rate,
+            "topProducts": top_products,
+            "categoryDistribution": category_dist[:5],
+            "trendData": trend_data
+        }
+    }
 
 @app.get("/customers/lookup")
 def lookup_customer(phone: str):

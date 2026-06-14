@@ -7,7 +7,7 @@ import { apiClient } from './api';
 import { Analytics } from '../types';
 
 export const analyticsService = {
-  getAnalytics: (): Promise<Analytics> => {
-    return apiClient.getAnalytics();
+  getAnalytics: (timeframe: '7d' | '30d'): Promise<Analytics> => {
+    return apiClient.getAnalytics(timeframe);
   }
 };

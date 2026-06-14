@@ -22,26 +22,48 @@ export default function KhataLedger() {
 
   const loadLedger = async () => {
     setLoading(true);
-    const list = await apiClient.getKhataTransactions();
-    const custs = await apiClient.getCustomers();
-    setTxns(list);
-    setCustomers(custs);
     try {
-      const analytics = await apiClient.getAnalytics();
-      setAgeing((analytics as any).khata_ageing || []);
-    } catch (e) {
-      setAgeing([]);
+      const custs = await apiClient.getCustomers();
+      setCustomers(custs);
+      
+      // Load transactions for each customer or get all khata entries
+      const allTxns: KhataTransaction[] = [];
+      for (const customer of custs) {
+        const customerTxns = await apiClient.getKhataTransactions(customer.id);
+        allTxns.push(...customerTxns);
+      }
+      setTxns(allTxns.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()));
+      
+      try {
+        const analytics = await apiClient.getAnalytics();
+        setAgeing((analytics as any).khata_ageing || []);
+      } catch (e) {
+        // Mock ageing data if none exists
+        setAgeing([
+          { range: "0-7 days", amount: 0 },
+          { range: "8-15 days", amount: 0 },
+          { range: "16-30 days", amount: 0 },
+          { range: ">30 days", amount: 0 }
+        ]);
+      }
+    } catch (error) {
+      console.error('Failed to load ledger:', error);
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   const getOutstandingTotal = () => {
-    return customers.reduce((sum, c) => c.khataBalance < 0 ? sum + Math.abs(c.khataBalance) : sum, 0);
+    // khataBalance is negative (e.g., -180), so convert to positive for display
+    return customers.reduce((sum, c) => {
+      const balance = c.khataBalance || 0;
+      // If balance is negative, add its absolute value
+      return sum + (balance < 0 ? Math.abs(balance) : balance);
+    }, 0);
   };
-
   const filteredTxns = txns.filter(t => {
-    const matchesSearch = t.customerName.toLowerCase().includes(search.toLowerCase()) || 
-                          t.description.toLowerCase().includes(search.toLowerCase());
+    const matchesSearch = t.customerName?.toLowerCase().includes(search.toLowerCase()) || 
+                          t.description?.toLowerCase().includes(search.toLowerCase());
     const matchesType = typeFilter === 'all' || t.type === typeFilter;
     return matchesSearch && matchesType;
   });
@@ -56,10 +78,11 @@ export default function KhataLedger() {
         </div>
         <button 
           onClick={() => {
+            if (txns.length === 0) return;
             const keys = ["Date", "Customer", "Type", "Amount", "Notes"];
             const csvContent = "data:text/csv;charset=utf-8," 
               + keys.join(",") + "\n"
-              + txns.map(t => `"${t.date}","${t.customerName}","${t.type}","${t.amount}","${t.description}"`).join("\n");
+              + txns.map(t => `"${t.date}","${t.customerName}","${t.type}","${t.amount}","${t.description || ''}"`).join("\n");
             const encodedUri = encodeURI(csvContent);
             const link = document.createElement("a");
             link.setAttribute("href", encodedUri);
@@ -84,7 +107,7 @@ export default function KhataLedger() {
               ₹ {getOutstandingTotal().toLocaleString('en-IN')}
             </div>
             <p className="text-xs text-[#888888] mt-3">
-              Total credit owed by customers across 5 active household records.
+              Total credit owed by customers across {customers.length} active records.
             </p>
           </div>
           <div className="flex items-center gap-2 text-xs bg-red-500/5 text-red-400 p-2.5 rounded border border-red-500/10">
@@ -98,15 +121,14 @@ export default function KhataLedger() {
           <div>
             <span className="text-[10px] font-bold text-[#888888] uppercase tracking-wider block">Credit Ageing Cohort Analysis (Overdue)</span>
             <div className="grid grid-cols-4 gap-4 mt-6 text-xs">
-              {ageing.map((co, idx) => {
-                const maxAmt = Math.max(...ageing.map(c => c.amount || 0));
+              {ageing.length > 0 ? ageing.map((co, idx) => {
+                const maxAmt = Math.max(...ageing.map(c => c.amount || 0), 1);
                 const heightPercentage = maxAmt > 0 ? ((co.amount || 0) / maxAmt) * 100 : 0;
                 return (
                   <div key={idx} className="flex flex-col items-center justify-end h-24">
-                    <span className="text-[10px] font-semibold text-white font-mono">₹{co.amount.toLocaleString()}</span>
-                    {/* The bar */}
+                    <span className="text-[10px] font-semibold text-white font-mono">₹{(co.amount || 0).toLocaleString()}</span>
                     <div 
-                      style={{ height: `${heightPercentage}%` }}
+                      style={{ height: `${Math.max(heightPercentage, 4)}%` }}
                       className={`w-full max-w-[28px] mt-1.5 rounded-t-sm transition-all duration-700 ${
                         idx === 0 ? 'bg-[#10B981]/20' : idx === 1 ? 'bg-amber-500/20' : 'bg-red-400/40'
                       }`}
@@ -114,7 +136,9 @@ export default function KhataLedger() {
                     <span className="text-[9px] text-[#888888] font-bold uppercase tracking-wide mt-2">{co.range}</span>
                   </div>
                 );
-              })}
+              }) : (
+                <div className="col-span-4 text-center text-[#888888] text-xs">No ageing data available</div>
+              )}
             </div>
           </div>
         </div>
@@ -131,7 +155,7 @@ export default function KhataLedger() {
               placeholder="Filter ledger stream by comments..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="w-full bg-[#0F0F0F] border border-[#1F1F1F] rounded-sm text-xs pl-9 pr-4 py-2 text-white focus:outline-none"
+              className="w-full bg-[#0F0F0F] border border-[#1F1F1F] rounded-sm text-xs pl-9 pr-4 py-2 text-white focus:outline-none focus:border-[#333]"
             />
           </div>
 
@@ -172,18 +196,18 @@ export default function KhataLedger() {
                 {filteredTxns.map((t, idx) => {
                   const isPayment = t.type === 'payment';
                   return (
-                    <tr key={idx} className="table-row-hover transition-colors">
+                    <tr key={idx} className="hover:bg-[#1a1a1a] transition-colors">
                       <td className="p-4 font-mono text-[10px] text-[#888888]">
                         {new Date(t.date).toLocaleString()}
                       </td>
                       <td className="p-4 text-white font-semibold">{t.customerName}</td>
-                      <td className="p-4 text-[#888888]">{t.description}</td>
+                      <td className="p-4 text-[#888888]">{t.description || 'No description'}</td>
                       <td className="p-4 text-right">
                         <span className={`inline-flex items-center gap-1 font-semibold font-mono ${
                           isPayment ? 'text-[#4edea3]' : 'text-red-400'
                         }`}>
                           {isPayment ? <ArrowDownLeft size={12} /> : <ArrowUpRight size={12} />}
-                          ₹ {t.amount}
+                          ₹ {t.amount.toLocaleString()}
                         </span>
                       </td>
                     </tr>

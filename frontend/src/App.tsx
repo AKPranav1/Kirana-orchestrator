@@ -13,8 +13,6 @@ import LiveOrders from './pages/LiveOrders';
 import Customers from './pages/Customers';
 import KhataLedger from './pages/KhataLedger';
 import Inventory from './pages/Inventory';
-import PurchaseOrders from './pages/PurchaseOrders';
-import Suppliers from './pages/Suppliers';
 import Analytics from './pages/Analytics';
 import Forecasts from './pages/Forecasts';
 import Reports from './pages/Reports';
@@ -55,10 +53,6 @@ export default function App() {
         return <KhataLedger />;
       case 'inventory':
         return <Inventory />;
-      case 'purchase_orders':
-        return <PurchaseOrders />;
-      case 'suppliers':
-        return <Suppliers />;
       case 'analytics':
         return <Analytics />;
       case 'forecasts':
@@ -111,8 +105,6 @@ export default function App() {
                  { id: 'customers', name: 'Customers' },
                  { id: 'khata', name: 'Credit Book' },
                  { id: 'inventory', name: 'Products' },
-                 { id: 'purchase_orders', name: 'Orders to Supplier' },
-                 { id: 'suppliers', name: 'Wholesalers' },
                  { id: 'analytics', name: 'Sales Insights' },
                  { id: 'forecasts', name: 'Stock Suggestions' },
                  { id: 'reports', name: 'Reports' },

@@ -71,51 +71,70 @@ export const apiClient = {
   // --- CUSTOMERS - Get all data including lifetime revenue and order history ---
   getCustomers: async (): Promise<Customer[]> => {
     try {
-      // Fetch all khata records for balances
+      // 1. Fetch raw customers (leaderboard)
+      const res = await fetch(`${DB_ALERTS_BASE}/customers/leaderboard`);
+      if (!res.ok) throw new Error(`getCustomers ${res.status}`);
+      const json = await res.json();
+      let customers = json.customers || [];
+
+      // 2. Fetch all khata balances (to compute khataBalance, order_count, lifetime_spend)
       const khataRes = await fetch(`${DB_ALERTS_BASE}/khata`);
-      if (!khataRes.ok) {
-        console.warn('Failed to fetch khata');
-        return [];
-      }
-      
       const khataData = await khataRes.json();
-      const khataRecords = khataData.records || [];
-      
-      // Fetch customer leaderboard for lifetime spend and order count
-      const customersRes = await fetch(`${DB_ALERTS_BASE}/customers/leaderboard?limit=100`);
-      const customersData = await customersRes.json();
-      const customersList = customersData.customers || [];
-      
-      // Create map for customer metrics
-      const customerMetrics = new Map();
-      customersList.forEach((c: any) => {
-        customerMetrics.set(c.customer_name, {
-          lifetimeSpend: c.lifetime_spend || 0,
-          orderCount: c.order_count || 0,
-          avgBasket: c.order_count > 0 ? (c.lifetime_spend / c.order_count) : 0
+      const khataMap = new Map(); // key: customerName -> total_outstanding
+      if (khataData.records) {
+        khataData.records.forEach((rec: any) => {
+          const name = rec.customer_name;
+          if (!name) return;
+          khataMap.set(name, rec.total_outstanding || 0);
         });
-      });
-      
-      // Build customers with all data
-      const customers = khataRecords.map((record: any) => {
-        const name = record.customer_name;
-        const metrics = customerMetrics.get(name) || { lifetimeSpend: 0, orderCount: 0, avgBasket: 0 };
-        
+      }
+
+      // 3. Fetch all orders to compute avgBasket and lifetimeSpend if missing
+      const ordersRes = await fetch(DB_ALERTS_ORDERS);
+      let ordersMap = new Map(); // key: customerName -> { totalSpend, orderCount }
+      if (ordersRes.ok) {
+        const ordersJson = await ordersRes.json();
+        const orders = ordersJson.orders || [];
+        for (const order of orders) {
+          const name = order.customer_name || order.customerName;
+          if (!name) continue;
+          const amount = order.total_amount || order.totalAmount || 0;
+          if (!ordersMap.has(name)) ordersMap.set(name, { totalSpend: 0, orderCount: 0 });
+          const entry = ordersMap.get(name);
+          entry.totalSpend += amount;
+          entry.orderCount += 1;
+        }
+      }
+
+      // 4. Enrich each customer
+      const enriched: Customer[] = customers.map((c: any) => {
+        const name = c.customer_name || c.name || "";
+        const outstanding = khataMap.get(name) || 0;
+        // Frontend expects khataBalance negative for overdue (money owed by customer)
+        const khataBalance = -outstanding;
+        const orderStats = ordersMap.get(name) || { totalSpend: 0, orderCount: 0 };
+        const lifetimeSpend = c.lifetime_spend ?? orderStats.totalSpend;
+        const orderCount = c.order_count ?? orderStats.orderCount;
+        const avgBasket = orderCount > 0 ? lifetimeSpend / orderCount : 0;
+
+        let status: 'Frequent' | 'Overdue' | 'Standard' = 'Standard';
+        if (khataBalance < -1000) status = 'Overdue';
+        else if (orderCount > 5) status = 'Frequent';
+
         return {
-          id: name,
+          id: c.id || name,
           name: name,
-          phone: record.customer_phone || "",
-          status: (record.total_outstanding || 0) > 1000 ? 'Overdue' : 'Standard',
-          khataBalance: record.total_outstanding || 0,
-          avgBasket: metrics.avgBasket,
-          lifetimeSpend: metrics.lifetimeSpend,
-          orderCount: metrics.orderCount,  // Add this to Customer type
+          phone: c.customer_phone || c.phone || "",
+          status,
+          khataBalance,
+          avgBasket,
+          lifetimeSpend,
+          lastOrderDate: c.last_order_at || undefined,
         };
       });
-      
-      return customers;
+      return enriched;
     } catch (e) {
-      console.error('getCustomers failed:', e);
+      console.warn('apiClient.getCustomers failed:', e);
       return [];
     }
   },
@@ -390,19 +409,12 @@ export const apiClient = {
   },
 
   // --- ANALYTICS ---
-  getAnalytics: async (): Promise<Analytics> => {
+  getAnalytics: async (timeframe: '7d' | '30d' = '7d'): Promise<Analytics> => {
     try {
-      const res = await fetch(`${DB_ALERTS_BASE}/analytics`);
+      const res = await fetch(`${DB_ALERTS_BASE}/analytics?timeframe=${timeframe}`);
       if (res.ok) {
         const json = await res.json();
-        return json.analytics || {
-          totalRevenue: 0,
-          totalOrders: 0,
-          khataRecoveryRate: 0,
-          topProducts: [],
-          categoryDistribution: [],
-          trendData: [],
-        };
+        return json.analytics;
       }
     } catch (e) {
       console.warn('getAnalytics failed:', e);
@@ -417,7 +429,7 @@ export const apiClient = {
       trendData: [],
     };
   },
-
+  
   // --- NOTIFICATIONS ---
   getNotifications: async (): Promise<Notification[]> => {
     const baseNotifications: Notification[] = [

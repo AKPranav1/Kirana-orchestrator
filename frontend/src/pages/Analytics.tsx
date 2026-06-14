@@ -29,16 +29,28 @@ export default function AnalyticsView() {
 
   useEffect(() => {
     loadAnalytics();
-  }, []);
+  }, [timeframe]); // Reload when timeframe changes
 
   const loadAnalytics = async () => {
     setLoading(true);
-    const res = await analyticsService.getAnalytics();
-    setData(res);
-    setLoading(false);
+    try {
+      const res = await analyticsService.getAnalytics(timeframe); // Pass timeframe to API
+      setData(res);
+    } catch (error) {
+      console.error('Failed to load analytics:', error);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const COLORS = ['#10B981', '#3B82F6', '#F59E0B', '#EF4444', '#8B5CF6'];
+
+  // Add fallback/empty data to prevent undefined errors
+  const safeData = {
+    trendData: data?.trendData || [],
+    categoryDistribution: data?.categoryDistribution || [],
+    topProducts: data?.topProducts || []
+  };
 
   return (
     <div className="space-y-6">
@@ -86,47 +98,53 @@ export default function AnalyticsView() {
             </div>
 
             <div className="h-72 w-full">
-              <ResponsiveContainer width="100%" height="100%">
-                <AreaChart
-                  data={data.trendData}
-                  margin={{ top: 10, right: 10, left: -20, bottom: 0 }}
-                >
-                  <defs>
-                    <linearGradient id="colorRevenue" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#10B981" stopOpacity={0.1}/>
-                      <stop offset="95%" stopColor="#10B981" stopOpacity={0}/>
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid stroke="#1F1F1F" vertical={false} />
-                  <XAxis 
-                    dataKey="date" 
-                    stroke="#888888" 
-                    fontSize={10} 
-                    tickLine={false} 
-                    axisLine={false}
-                  />
-                  <YAxis 
-                    stroke="#888888" 
-                    fontSize={10} 
-                    tickLine={false} 
-                    axisLine={false}
-                  />
-                  <Tooltip 
-                    contentStyle={{ backgroundColor: '#121212', borderColor: '#1F1F1F', borderRadius: '4px' }}
-                    labelStyle={{ color: '#888888', fontSize: '11px' }}
-                    itemStyle={{ color: 'white', fontSize: '12px' }}
-                  />
-                  <Area 
-                    type="monotone" 
-                    dataKey="revenue" 
-                    stroke="#10B981" 
-                    fillOpacity={1} 
-                    fill="url(#colorRevenue)" 
-                    strokeWidth={2}
-                    name="Revenue (₹)"
-                  />
-                </AreaChart>
-              </ResponsiveContainer>
+              {safeData.trendData.length > 0 ? (
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart
+                    data={safeData.trendData}
+                    margin={{ top: 10, right: 10, left: -20, bottom: 0 }}
+                  >
+                    <defs>
+                      <linearGradient id="colorRevenue" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#10B981" stopOpacity={0.1}/>
+                        <stop offset="95%" stopColor="#10B981" stopOpacity={0}/>
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid stroke="#1F1F1F" vertical={false} />
+                    <XAxis 
+                      dataKey="date" 
+                      stroke="#888888" 
+                      fontSize={10} 
+                      tickLine={false} 
+                      axisLine={false}
+                    />
+                    <YAxis 
+                      stroke="#888888" 
+                      fontSize={10} 
+                      tickLine={false} 
+                      axisLine={false}
+                    />
+                    <Tooltip 
+                      contentStyle={{ backgroundColor: '#121212', borderColor: '#1F1F1F', borderRadius: '4px' }}
+                      labelStyle={{ color: '#888888', fontSize: '11px' }}
+                      itemStyle={{ color: 'white', fontSize: '12px' }}
+                    />
+                    <Area 
+                      type="monotone" 
+                      dataKey="revenue" 
+                      stroke="#10B981" 
+                      fillOpacity={1} 
+                      fill="url(#colorRevenue)" 
+                      strokeWidth={2}
+                      name="Revenue (₹)"
+                    />
+                  </AreaChart>
+                </ResponsiveContainer>
+              ) : (
+                <div className="flex items-center justify-center h-full text-[#888888] text-sm">
+                  No revenue data available
+                </div>
+              )}
             </div>
           </div>
 
@@ -139,40 +157,49 @@ export default function AnalyticsView() {
               </div>
 
               <div className="flex-1 flex items-center justify-center gap-4">
-                <div className="w-40 h-40">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <PieChart>
-                      <Pie
-                        data={data.categoryDistribution}
-                        cx="50%"
-                        cy="50%"
-                        innerRadius={50}
-                        outerRadius={70}
-                        paddingAngle={3}
-                        dataKey="value"
-                      >
-                        {(data.categoryDistribution||[]).map((entry, index) => (
-                          <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                        ))}
-                      </Pie>
-                      <Tooltip 
-                        contentStyle={{ backgroundColor: '#121212', borderColor: '#1F1F1F' }}
-                        itemStyle={{ color: 'white', fontSize: '11px' }}
-                      />
-                    </PieChart>
-                  </ResponsiveContainer>
-                </div>
-
-                {/* Legend list */}
-                <div className="space-y-2 text-xs">
-                  {(data.categoryDistribution||[]).map((entry, idx) => (
-                    <div key={idx} className="flex items-center gap-2">
-                      <div className="w-2.5 h-2.5 rounded-sm" style={{ backgroundColor: COLORS[idx % COLORS.length] }}></div>
-                      <span className="text-[#888888]">{entry.name}</span>
-                      <span className="text-white font-semibold font-mono">{entry.value}%</span>
+                {safeData.categoryDistribution.length > 0 ? (
+                  <>
+                    <div className="w-40 h-40">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <PieChart>
+                          <Pie
+                            data={safeData.categoryDistribution}
+                            cx="50%"
+                            cy="50%"
+                            innerRadius={50}
+                            outerRadius={70}
+                            paddingAngle={3}
+                            dataKey="value"
+                            nameKey="name"
+                          >
+                            {safeData.categoryDistribution.map((entry, index) => (
+                              <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                            ))}
+                          </Pie>
+                          <Tooltip 
+                            contentStyle={{ backgroundColor: '#121212', borderColor: '#1F1F1F' }}
+                            itemStyle={{ color: 'white', fontSize: '11px' }}
+                          />
+                        </PieChart>
+                      </ResponsiveContainer>
                     </div>
-                  ))}
-                </div>
+
+                    {/* Legend list */}
+                    <div className="space-y-2 text-xs">
+                      {safeData.categoryDistribution.map((entry, idx) => (
+                        <div key={idx} className="flex items-center gap-2">
+                          <div className="w-2.5 h-2.5 rounded-sm" style={{ backgroundColor: COLORS[idx % COLORS.length] }}></div>
+                          <span className="text-[#888888]">{entry.name}</span>
+                          <span className="text-white font-semibold font-mono">{entry.value}%</span>
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                ) : (
+                  <div className="text-[#888888] text-sm text-center w-full">
+                    No category data available
+                  </div>
+                )}
               </div>
             </div>
 
@@ -184,32 +211,42 @@ export default function AnalyticsView() {
               </div>
 
               <div className="w-full h-[300px] mt-2">
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart
-                    data={data.topProducts}
-                    margin={{ top: 10, right: 10, left: -25, bottom: 0 }}
-                  >
-                    <CartesianGrid stroke="#1F1F1F" vertical={false} />
-                    <XAxis 
-                      dataKey="name" 
-                      stroke="#888888" 
-                      fontSize={8} 
-                      tickLine={false} 
-                      axisLine={false}
-                    />
-                    <YAxis 
-                      stroke="#888888" 
-                      fontSize={10} 
-                      tickLine={false} 
-                      axisLine={false}
-                    />
-                    <Tooltip 
-                      contentStyle={{ backgroundColor: '#121212', borderColor: '#1F1F1F' }}
-                      itemStyle={{ color: 'white', fontSize: '11px' }}
-                    />
-                    <Bar dataKey="revenue" fill="#10B981" radius={[2, 2, 0, 0]} name="Revenue Collected (₹)" />
-                  </BarChart>
-                </ResponsiveContainer>
+                {safeData.topProducts.length > 0 ? (
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart
+                      data={safeData.topProducts}
+                      margin={{ top: 10, right: 10, left: -25, bottom: 0 }}
+                      layout="vertical"
+                    >
+                      <CartesianGrid stroke="#1F1F1F" horizontal={false} />
+                      <XAxis 
+                        type="number"
+                        stroke="#888888" 
+                        fontSize={10} 
+                        tickLine={false} 
+                        axisLine={false}
+                      />
+                      <YAxis 
+                        type="category"
+                        dataKey="name" 
+                        stroke="#888888" 
+                        fontSize={8} 
+                        tickLine={false} 
+                        axisLine={false}
+                        width={80}
+                      />
+                      <Tooltip 
+                        contentStyle={{ backgroundColor: '#121212', borderColor: '#1F1F1F' }}
+                        itemStyle={{ color: 'white', fontSize: '11px' }}
+                      />
+                      <Bar dataKey="revenue" fill="#10B981" radius={[0, 2, 2, 0]} name="Revenue Collected (₹)" />
+                    </BarChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <div className="flex items-center justify-center h-full text-[#888888] text-sm">
+                    No product data available
+                  </div>
+                )}
               </div>
             </div>
           </div>
