@@ -174,7 +174,7 @@ def _apply_group_discount(calculated_total: float) -> tuple[float, float, float]
 
 # ── Write Order ────────────────────────────────────────────────────────────────
 def _write_order(
-    orders_col: Collection, order: dict, shopkeeper_phone: str
+    db, orders_col: Collection, order: dict, shopkeeper_phone: str
 ) -> tuple[str, dict]:
     order_id = str(uuid.uuid4())
     now      = datetime.now(timezone.utc)

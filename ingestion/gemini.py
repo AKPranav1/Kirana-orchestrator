@@ -155,7 +155,24 @@ _KHATA_PHRASES = re.compile(
     r"|udhaara|khate\s*ge|kaadanai|kadan|adharam|udhari"
     r"|khata\s*madhe|udhaar\s*de|khate\s*nakho|udhaar\s*aap"
     r"|khate\s*rakho|udhaar\s*dao|khate\s*pa|udhaar\s*de"
-    r"|khaatayil|kadam\s*tharuu|khatare\s*rakha|udhara\s*deba",
+    r"|khaatayil|kadam\s*tharuu|khatare\s*rakha|udhara\s*deba"
+    # ── Kannada ──────────────────────────────────────────────────────────────
+    r"|khaate|khaathe|khaata|khata"
+    r"|ಖಾತೆ|ಖಾತಾ"
+    # ── Tamil ────────────────────────────────────────────────────────────────
+    r"|kaadhaa|kaat|kadhaa|kadhai|கடன்|கணக்கு"
+    # ── Telugu ───────────────────────────────────────────────────────────────
+    r"|khaathaa|khaatha|ఖాతా|అప్పు"
+    # ── Malayalam ────────────────────────────────────────────────────────────
+    r"|kadha|കടം|കണക്ക്"
+    # ── Bengali ──────────────────────────────────────────────────────────────
+    r"|khaata|khata|খাতা|ধার"
+    # ── Marathi ──────────────────────────────────────────────────────────────
+    r"|khaate|khate|खाते|उधारी"
+    # ── Gujarati ─────────────────────────────────────────────────────────────
+    r"|khaata|khata|ખાતું|ઉધાર"
+    # ── Punjabi ──────────────────────────────────────────────────────────────
+    r"|khaata|khata|ਖਾਤਾ|ਉਧਾਰ",
     flags=re.IGNORECASE,
 )
 _PDF_PHRASES = re.compile(

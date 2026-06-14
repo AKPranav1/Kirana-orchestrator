@@ -9,7 +9,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from ingestion.utils import normalize_text
-from ingestion.gemini import parse_order_text
+from ingestion.gemini import parse_order_text, _KHATA_PHRASES
 from ingestion.sarvam import speech_to_text, vision_ocr
 from ingestion.sku_match import SKUMatcher
 from ingestion.orchestrator import orchestrate_order_processing
@@ -60,6 +60,109 @@ TWILIO_TOKEN = os.getenv("TWILIO_AUTH_TOKEN")
 
 app = FastAPI(title="Kirana AI — Ingestion", version="1.1.0")
 
+# URL for DB & alerts service (Person 3)
+DB_ALERTS_URL = os.getenv("DB_ALERTS_URL", "http://localhost:8002")
+
+# ── Multilingual khata question detection ─────────────────────────────────
+# Single-token question words (word-bounded, Latin + Indic scripts)
+_KHATA_Q_WORDS = re.compile(
+    r"\b(?:"
+    # Hindi / Hinglish
+    r"kitna|kitne|kittna|kitni|kya|baki|kittana"
+    # English
+    r"|how\s+much|what\s+is|balance|outstanding"
+    # Kannada (Latin + script)
+    r"|eshtu|yestu|yastu|iddhe"
+    r"|ಎಷ್ಟು|ಯಷ್ಟು"
+    # Tamil (Latin + script)
+    r"|evvalavu|evalavu|எவ்வளவு"
+    # Telugu (Latin + script)
+    r"|entha|enta|ఎంత"
+    # Malayalam (Latin + script)
+    r"|etra|ethra|എത്ര"
+    # Marathi
+    r"|kitke|kitka|किती|कितके"
+    # Gujarati
+    r"|ketlu|કેટલું"
+    # Bengali
+    r"|koto|কত"
+    # Punjabi
+    r"|kinna|ਕਿੰਨਾ"
+    r")\b",
+    re.IGNORECASE,
+)
+# Multi-token question phrases (exact sequence)
+_KHATA_Q_PHRASES = re.compile(
+    r"kitna\s+hai|kya\s+hai|baki\s+kitna"
+    r"|how\s+much|what\s+is"
+    r"|eshtu\s+ide|yestu\s+ide|yastu\s+ide|eshtu\s+iddhe"
+    r"|evvalavu\s+irukku|evalavu\s+irukku"
+    r"|entha\s+undi|enta\s+undi"
+    r"|etra\s+undu|ethra\s+undu"
+    r"|koto\s+taka",
+    re.IGNORECASE,
+)
+
+_KHATA_BALANCE_TEMPLATES = {
+    "hi": ("नमस्ते {name}। आपका खाता बैलेंस ₹{amt:.2f} है।", "नमस्ते {name}। कोई खाता रिकॉर्ड नहीं मिला।"),
+    "kn": ("ನಮಸ್ಕಾರ {name}. ನಿಮ್ಮ ಖಾತೆ ಬ್ಯಾಲೆನ್ಸ್ ₹{amt:.2f}.", "ನಮಸ್ಕಾರ {name}. ಯಾವುದೇ ಖಾತೆ ದಾಖಲೆ ಕಂಡುಬಂದಿಲ್ಲ."),
+    "ta": ("வணக்கம் {name}. உங்கள் கணக்கு இருப்பு ₹{amt:.2f}.", "வணக்கம் {name}. கணக்கு பதிவு எதுவும் இல்லை."),
+    "te": ("నమస్కారం {name}. మీ ఖాతా బ్యాలెన్స్ ₹{amt:.2f}.", "నమస్కారం {name}. ఖాతా రికార్డు ఏదీ కనుగొనబడలేదు."),
+    "ml": ("നമസ്കാരം {name}. നിങ്ങളുടെ അക്കൗണ്ട് ബാലൻസ് ₹{amt:.2f}.", "നമസ്കാരം {name}. അക്കൗണ്ട് റെക്കോർഡ് ഒന്നും കണ്ടെത്തിയില്ല."),
+    "mr": ("नमस्कार {name}. तुमचे खाते शिल्लक ₹{amt:.2f} आहे.", "नमस्कार {name}. कोणताही खाते रेकॉर्ड आढळला नाही."),
+    "gu": ("નમસ્તે {name}. તમારું ખાતા બૅલેન્સ ₹{amt:.2f} છે.", "નમસ્તે {name}. કોઈ ખાતા રેકોર્ડ મળ્યો નહીં."),
+    "bn": ("নমস্কার {name}। আপনার হিসাবের ব্যালেন্স ₹{amt:.2f}।", "নমস্কার {name}। কোনো হিসাবের রেকর্ড পাওয়া যায়নি।"),
+    "pa": ("ਸਤਿ ਸ੍ਰੀ ਅਕਾਲ {name}। ਤੁਹਾਡਾ ਖਾਤਾ ਬੈਲੈਂਸ ₹{amt:.2f} ਹੈ।", "ਸਤਿ ਸ੍ਰੀ ਅਕਾਲ {name}। ਕੋਈ ਖਾਤਾ ਰਿਕਾਰਡ ਨਹੀਂ ਮਿਲਿਆ।"),
+}
+_EN_BALANCE   = "Hello {name}. Your khata balance is ₹{amt:.2f}."
+_EN_NO_RECORD = "Hello {name}. No khata record found."
+_EN_ERROR     = "Error fetching khata — please try again later."
+
+def _build_khata_message(lang: str, name: str, amt: float | None = None) -> str:
+    templates = _KHATA_BALANCE_TEMPLATES.get(lang[:2] if lang else "hi", _KHATA_BALANCE_TEMPLATES["hi"])
+    if amt is None:
+        return f"{_EN_ERROR}"
+    if amt >= 0:
+        native = templates[0].format(name=name, amt=amt)
+        english = _EN_BALANCE.format(name=name, amt=amt)
+    else:
+        native = templates[1].format(name=name)
+        english = _EN_NO_RECORD.format(name=name)
+    return f"{native}\n{english}"
+
+def _is_khata_question(text: str) -> bool:
+    """Return True if text looks like a khata balance inquiry."""
+    return bool(_KHATA_Q_WORDS.search(text) or _KHATA_Q_PHRASES.search(text))
+
+# ── Latin-script Indic keyword map for language detection ─────────────────
+_LATIN_INDIC_KEYWORDS = {
+    "kn": {"eshtu", "yestu", "yastu", "iddhe", "ide", "illa", "beku", "koḍi", "kodi", "thumba"},
+    "ta": {"evvalavu", "evalavu", "illai", "irukku", "kudu", "romba", "enna"},
+    "te": {"entha", "enta", "undi", "ledu", "ivvu", "chala", "meeru"},
+    "ml": {"etra", "ethra", "undo", "illa", "tharo", "venda", "ingane"},
+    "mr": {"kitke", "kitka", "nahi", "dya", "aahe", "kara"},
+    "gu": {"ketlu", "nathi", "apo", "chhe"},
+    "bn": {"koto", "dao", "ache", "nei"},
+    "pa": {"kinna", "nahi", "de", "hai"},
+}
+
+def detect_lang_hint(text: str) -> str:
+    # Unicode script detection first (most reliable)
+    if re.search(r'[\u0C80-\u0CFF]', text): return "kn"
+    if re.search(r'[\u0B80-\u0BFF]', text): return "ta"
+    if re.search(r'[\u0C00-\u0C7F]', text): return "te"
+    if re.search(r'[\u0D00-\u0D7F]', text): return "ml"
+    if re.search(r'[\u0A00-\u0A7F]', text): return "pa"
+    if re.search(r'[\u0980-\u09FF]', text): return "bn"
+    if re.search(r'[\u0A80-\u0AFF]', text): return "gu"
+    if re.search(r'[\u0900-\u097F]', text): return "hi"
+    # Latin-script keyword fallback
+    tokens = set(text.lower().split())
+    for lang, keywords in _LATIN_INDIC_KEYWORDS.items():
+        if tokens & keywords:
+            return lang
+    return "en"
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -91,7 +194,7 @@ async def health():
 async def process(req: ProcessRequest):
     payload_type  = req.payload_type
     payload       = req.payload
-    language_hint = req.language_hint or "hi"
+    language_hint = req.language_hint if req.language_hint and req.language_hint != "unknown" else detect_lang_hint(payload)
     raw_input_url = None
     clean_text    = ""
 
@@ -101,7 +204,7 @@ async def process(req: ProcessRequest):
         try:
             auth = (TWILIO_SID, TWILIO_TOKEN) if TWILIO_SID and TWILIO_TOKEN else None
             async with httpx.AsyncClient(timeout=30) as client:
-                r = await client.get(payload, auth=auth)
+                r = await client.get(payload, auth=auth, follow_redirects=True)
                 r.raise_for_status()
                 text, _ = await speech_to_text(r.content)
                 clean_text, _ = normalize_text(text)
@@ -115,7 +218,7 @@ async def process(req: ProcessRequest):
         try:
             auth = (TWILIO_SID, TWILIO_TOKEN) if TWILIO_SID and TWILIO_TOKEN else None
             async with httpx.AsyncClient(timeout=30) as client:
-                r = await client.get(payload, auth=auth)
+                r = await client.get(payload, auth=auth, follow_redirects=True)
                 r.raise_for_status()
                 text, meta = await vision_ocr(r.content)
                 clean_text, _ = normalize_text(text)
@@ -133,7 +236,43 @@ async def process(req: ProcessRequest):
         input_meta = {"input_type": payload_type, "raw_input_url": raw_input_url, "customer_phone": req.customer_phone}
 
     # ── 2. LLM EXTRACTION + SKU MATCHING ──────────────────────────
+    # Early intercept: if the text is a khata/balance question, answer directly
     try:
+        if _KHATA_PHRASES.search(clean_text) and _is_khata_question(clean_text) and not re.search(r"\d", clean_text):
+            # Lookup customer name by phone (best-effort) then fetch khata ledger
+            import urllib.parse
+            name = None
+            try:
+                async with httpx.AsyncClient(timeout=5) as client:
+                    r = await client.get(f"{DB_ALERTS_URL}/customers/lookup", params={"phone": req.customer_phone})
+                    if r.status_code == 200:
+                        j = r.json()
+                        name = j.get("name")
+            except Exception:
+                name = None
+
+            if not name:
+                digits = "".join(c for c in (req.customer_phone or "") if c.isdigit())
+                if digits and len(digits) >= 4:
+                    name = f"Customer {digits[-4:]}"
+                else:
+                    name = "Unknown"
+
+            try:
+                async with httpx.AsyncClient(timeout=5) as client:
+                    name_q = urllib.parse.quote(name, safe="")
+                    r2 = await client.get(f"{DB_ALERTS_URL}/khata/{name_q}", params={"store_id": "store_001"})
+                    if r2.status_code == 200:
+                        kh = r2.json()
+                        outstanding = kh.get("total_outstanding", 0)
+                        message = _build_khata_message(language_hint, name, outstanding)
+                        return JSONResponse(status_code=200, content={"type": "khata_balance", "customer_name": name, "balance": outstanding, "message": message})
+                    else:
+                        message = _build_khata_message(language_hint, name, -1)  # -1 signals no-record path
+                        return JSONResponse(status_code=200, content={"type": "khata_balance", "customer_name": name, "balance": 0, "message": message})
+            except Exception:
+                message = _build_khata_message(language_hint, name, None)
+
         parsed = await parse_order_text(clean_text)
         print(f"[INGESTION] parsed_payload={parsed.model_dump()}", flush=True)
 
