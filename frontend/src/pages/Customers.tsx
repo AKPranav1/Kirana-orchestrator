@@ -4,25 +4,50 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { Users, Search, Plus, Star, AlertTriangle, Send, ScrollText, Check, DollarSign } from 'lucide-react';
+import { Users, Search, Plus, Star, AlertTriangle, Send, ScrollText, X } from 'lucide-react';
 import { Customer } from '../types';
 import { customersService } from '../services/customers';
+import { DB_ALERTS_ORDERS } from '../config';
+
+const formatMoney = (value: number): string => {
+  let rounded = Math.round((value || 0) * 100) / 100;
+  if (rounded === -0) rounded = 0;
+  return rounded.toFixed(2);
+};
+
+const safeToFixed = (value: any): string => {
+  const num = typeof value === 'number' && !isNaN(value) ? value : 0;
+  return num.toFixed(2);
+};
+
+interface LedgerEntry {
+  id: string;
+  type: 'order' | 'payment' | 'paid_order';
+  date: string;
+  description: string;
+  amount: number;
+  runningBalance: number;
+  items?: any[];
+  status?: string;
+}
 
 export default function Customers() {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
   
-  // Settle Khata Modal state
   const [settleCustomer, setSettleCustomer] = useState<Customer | null>(null);
   const [settleAmount, setSettleAmount] = useState("");
   const [settleDesc, setSettleDesc] = useState("Settle partial outstanding ledger");
   const [settleLoading, setSettleLoading] = useState(false);
 
-  // Add Customer standard form state
   const [showAddForm, setShowAddForm] = useState(false);
   const [newName, setNewName] = useState("");
   const [newPhone, setNewPhone] = useState("");
+
+  const [selectedCustomerForHistory, setSelectedCustomerForHistory] = useState<Customer | null>(null);
+  const [ledgerEntries, setLedgerEntries] = useState<LedgerEntry[]>([]);
+  const [ordersLoading, setOrdersLoading] = useState(false);
 
   useEffect(() => {
     loadCustomers();
@@ -31,21 +56,13 @@ export default function Customers() {
   const loadCustomers = async () => {
     setLoading(true);
     const list = await customersService.getCustomers();
-
-    setCustomers(
-      list.map((c: any) => ({
-        ...c,
-        name: c.name || c.customer_name || "Unknown Customer",
-        phone: c.phone || "",
-      }))
-    );
+    setCustomers(list);
     setLoading(false);
   };
 
   const handleAddCustomer = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newName.trim() || !newPhone.trim()) return;
-
     try {
       await customersService.addCustomer({
         name: newName,
@@ -61,26 +78,142 @@ export default function Customers() {
     }
   };
 
-  const handleRecordPayment = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!settleCustomer || !settleAmount || parseFloat(settleAmount) <= 0) return;
+const handleRecordPayment = async (e: React.FormEvent) => {
+  e.preventDefault();
+  if (!settleCustomer || !settleAmount || parseFloat(settleAmount) <= 0) return;
+  setSettleLoading(true);
+  try {
+    await customersService.addKhataTransaction(
+      settleCustomer.id,
+      'payment',  // This must be 'payment', not 'credit'
+      parseFloat(settleAmount),
+      settleDesc
+    );
+    setSettleAmount("");
+    setSettleCustomer(null);
+    // Reload customers to update khataBalance
+    await loadCustomers();
+    // Also refresh the ledger if it's open for this customer
+    if (selectedCustomerForHistory?.id === settleCustomer.id) {
+      await handleViewHistory(settleCustomer);
+    }
+  } catch (err) {
+    console.error(err);
+    alert("Error processing khata settlement.");
+  } finally {
+    setSettleLoading(false);
+  }
+};
 
-    setSettleLoading(true);
+  const extractItems = (order: any): any[] => {
+    if (order.items && Array.isArray(order.items)) {
+      return order.items.map((i: any) => ({
+        productName: i.name || i.productName || i.item_name || 'Unknown',
+        quantity: i.qty || i.quantity || 0,
+        price: i.unit_price || i.price || 0
+      }));
+    }
+    if (order.processed_splits && Array.isArray(order.processed_splits)) {
+      const allItems: any[] = [];
+      for (const split of order.processed_splits) {
+        if (split.items && Array.isArray(split.items)) {
+          allItems.push(...split.items.map((i: any) => ({
+            productName: i.item_name || i.name || 'Unknown',
+            quantity: i.quantity || i.qty || 0,
+            price: i.unit_price || i.price || 0
+          })));
+        }
+      }
+      return allItems;
+    }
+    return [];
+  };
+
+  const handleViewHistory = async (customer: Customer) => {
+    setSelectedCustomerForHistory(customer);
+    setOrdersLoading(true);
     try {
-      // payment type credits their khata towards positive (paying back money owed)
-      await customersService.addKhataTransaction(
-        settleCustomer.id,
-        'payment',
-        parseFloat(settleAmount),
-        settleDesc
-      );
-      setSettleAmount("");
-      setSettleCustomer(null);
-      loadCustomers();
+      const ordersRes = await fetch(DB_ALERTS_ORDERS);
+      const ordersJson = await ordersRes.json();
+      const rawOrders = ordersJson.orders || [];
+      
+      const allKhataTxns = await customersService.getKhataTransactions();
+      
+      const normalizedName = customer.name.trim().toLowerCase();
+      const normalizedPhone = customer.phone?.trim().toLowerCase() || '';
+      
+      const customerOrders = rawOrders.filter((o: any) => {
+        const orderName = (o.customer_name || o.customerName || '').trim().toLowerCase();
+        const orderPhone = (o.customer_phone || '').trim().toLowerCase();
+        return orderName === normalizedName || 
+               orderName.includes(normalizedName) ||
+               (normalizedPhone && orderPhone === normalizedPhone);
+      });
+      
+      const payments = allKhataTxns.filter(tx => {
+        const txName = (tx.customerName || '').trim().toLowerCase();
+        return tx.type === 'payment' && txName === normalizedName;
+      });
+      
+      const entries: LedgerEntry[] = [];
+      
+      customerOrders.forEach((order: any) => {
+        const items = extractItems(order);
+        const total = order.total_amount || order.totalAmount || 0;
+        const paymentMode = (order.payment_mode || order.paymentMode || 'cash').toLowerCase();
+        const isKhata = paymentMode === 'khata';
+        
+        entries.push({
+          id: `order-${order.order_id || order.id}`,
+          type: isKhata ? 'order' : 'paid_order',
+          date: order.created_at || order.createdAt || new Date().toISOString(),
+          description: `Order #${order.order_id || order.id} (${isKhata ? 'Khata' : 'Paid'})`,
+          amount: isKhata ? total : 0,
+          runningBalance: 0,
+          items: items,
+          status: order.status
+        });
+      });
+      
+      payments.forEach(tx => {
+        entries.push({
+          id: `payment-${tx.id}`,
+          type: 'payment',
+          date: tx.date,
+          description: tx.description,
+          amount: -tx.amount,
+          runningBalance: 0,
+        });
+      });
+      
+      // Sort ascending (oldest first) to calculate running balance
+      entries.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+      
+      let balance = 0;
+      const withBalanceAsc = entries.map(entry => {
+        if (entry.type === 'order') balance += entry.amount;
+        else if (entry.type === 'payment') balance += entry.amount;
+        // paid_order does nothing
+        return { ...entry, runningBalance: Math.max(0, balance) };
+      });
+      
+      // Reverse for display (latest first)
+      const entriesDisplay = [...withBalanceAsc].reverse();
+      
+      // Final balance is the runningBalance of the last (oldest) entry
+      const finalBalance = withBalanceAsc[withBalanceAsc.length - 1]?.runningBalance || 0;
+      
+      // Update customer's khataBalance in local state (store as negative because customer owes)
+      setCustomers(prev => prev.map(c => 
+        c.id === customer.id ? { ...c, khataBalance: -finalBalance } : c
+      ));
+      
+      setLedgerEntries(entriesDisplay);
     } catch (err) {
-      alert("Error processing khata settlement.");
+      console.error(err);
+      setLedgerEntries([]);
     } finally {
-      setSettleLoading(false);
+      setOrdersLoading(false);
     }
   };
 
@@ -97,220 +230,195 @@ export default function Customers() {
           <h2 className="text-xl font-bold text-white tracking-tight">Customer Directory</h2>
           <p className="text-xs text-[#888888] mt-1">Manage relationships, WhatsApp billing linkages, and outstanding Khata registers.</p>
         </div>
-        <button 
-          onClick={() => setShowAddForm(true)}
-          className="px-4 py-2 bg-white text-black hover:bg-[#e2e2e2] font-semibold text-xs rounded-sm flex items-center gap-2 cursor-pointer transition-colors"
-        >
+        <button onClick={() => setShowAddForm(true)} className="px-4 py-2 bg-white text-black hover:bg-[#e2e2e2] font-semibold text-xs rounded-sm flex items-center gap-2 cursor-pointer">
           <Plus size={14} /> Add New Customer
         </button>
       </div>
 
-      {/* Add customer form overlay block */}
       {showAddForm && (
-        <form onSubmit={handleAddCustomer} className="bg-[#121212] border border-[#10B981]/30 p-5 rounded-md space-y-4 max-w-md animate-pulse-soft">
+        <form onSubmit={handleAddCustomer} className="bg-[#121212] border border-[#10B981]/30 p-5 rounded-md space-y-4 max-w-md">
           <h3 className="text-xs font-semibold uppercase tracking-wider text-white">Create Customer Ledger Profile</h3>
           <div className="grid grid-cols-2 gap-3 text-xs">
-            <div className="space-y-1">
-              <label className="text-[#888888]">Customer Full Name</label>
-              <input 
-                type="text" 
-                value={newName}
-                onChange={(e) => setNewName(e.target.value)}
-                placeholder="Rohan Shinde"
-                className="w-full bg-[#0F0F0F] border border-[#1F1F1F] rounded-sm p-2 text-white focus:outline-none"
-                required
-              />
-            </div>
-            <div className="space-y-1">
-              <label className="text-[#888888]">Phone (+91)</label>
-              <input 
-                type="text" 
-                value={newPhone}
-                onChange={(e) => setNewPhone(e.target.value)}
-                placeholder="+91 91100 00000"
-                className="w-full bg-[#0F0F0F] border border-[#1F1F1F] rounded-sm p-2 text-white focus:outline-none"
-                required
-              />
-            </div>
+            <input type="text" value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="Full Name" className="w-full bg-[#0F0F0F] border border-[#1F1F1F] rounded-sm p-2 text-white" required />
+            <input type="text" value={newPhone} onChange={(e) => setNewPhone(e.target.value)} placeholder="Phone (+91)" className="w-full bg-[#0F0F0F] border border-[#1F1F1F] rounded-sm p-2 text-white" required />
           </div>
-          <div className="flex justify-end gap-2 text-xs">
-            <button 
-              type="button" 
-              onClick={() => setShowAddForm(false)}
-              className="px-3 py-1.5 bg-transparent border border-[#1F1F1F] text-[#888888]"
-            >
-              Cancel
-            </button>
-            <button 
-              type="submit" 
-              className="px-3 py-1.5 bg-[#10B981] text-black font-semibold rounded-sm"
-            >
-              Register Customer
-            </button>
+          <div className="flex justify-end gap-2">
+            <button type="button" onClick={() => setShowAddForm(false)} className="px-3 py-1.5 bg-transparent border border-[#1F1F1F] text-[#888888]">Cancel</button>
+            <button type="submit" className="px-3 py-1.5 bg-[#10B981] text-black font-semibold rounded-sm">Register</button>
           </div>
         </form>
       )}
 
-      {/* Search Bar */}
-      <div className="relative w-full max-w-2xl bg-[#121212] border border-[#1F1F1F] rounded-lg p-2 flex items-center justify-between">
-        <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-[#888888]" size={14} />
-          <input 
-            type="text"
-            placeholder="Search directory by name, phone and statuses..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="w-full bg-transparent border-none text-xs pl-9 pr-4 py-1.5 text-white placeholder-[#888888] focus:outline-none"
-          />
-        </div>
+      <div className="relative w-full max-w-2xl bg-[#121212] border border-[#1F1F1F] rounded-lg p-2">
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-[#888888]" size={14} />
+        <input type="text" placeholder="Search directory..." value={search} onChange={(e) => setSearch(e.target.value)} className="w-full bg-transparent border-none text-xs pl-8 pr-4 py-1.5 text-white placeholder-[#888888] focus:outline-none" />
       </div>
 
-      {/* Customers Cards list */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {filteredCustomers.map(c => {
-          const isOverdue = (c.khataBalance ?? 0) < -1000 || c.status === 'Overdue';
+          const khataOwed = Math.abs(c.khataBalance ?? 0);
+          const isOwed = (c.khataBalance ?? 0) < 0;
+          const isZero = khataOwed === 0;
+          const isOverdue = isOwed && khataOwed > 1000;
           const isFrequent = c.status === 'Frequent';
 
-          return (
-            <div 
-              key={c.id} 
-              className={`bg-[#121212] border rounded-md p-5 flex flex-col justify-between h-full hover:border-[#353534] transition-all relative overflow-hidden ${
-                isOverdue ? 'border-red-500/20' : 'border-[#1F1F1F]'
-              }`}
-            >
-              {isOverdue && (
-                <div className="absolute top-0 left-0 right-0 h-1 bg-red-400"></div>
-              )}
+          <p className={`font-semibold font-mono text-xs mt-1 ${
+            isZero ? 'text-green-500' : (isOwed ? 'text-red-400' : 'text-gray-400')
+          }`}>
+            ₹ {formatMoney(khataOwed)}
+          </p>
 
-              {/* Head stats */}
+          return (
+            <div key={c.id} className={`bg-[#121212] border rounded-md p-5 flex flex-col justify-between h-full hover:border-[#353534] transition-all relative ${isOverdue ? 'border-red-500/20' : 'border-[#1F1F1F]'}`}>
+              {isOverdue && <div className="absolute top-0 left-0 right-0 h-1 bg-red-400"></div>}
               <div className="flex justify-between items-start mb-4">
                 <div className="flex items-center gap-3">
-                  <div className="w-9 h-9 rounded-full bg-[#1C1B1B] border border-[#1F1F1F] flex items-center justify-center text-white font-semibold text-sm">
-                    {(c.name ?? "?").charAt(0)}
-                  </div>
+                  <div className="w-9 h-9 rounded-full bg-[#1C1B1B] border border-[#1F1F1F] flex items-center justify-center text-white font-semibold text-sm">{c.name.charAt(0)}</div>
                   <div>
-                    <h4 className="text-xs font-bold text-white">
-                      {c.name ?? (c as any).customer_name ?? "Unknown Customer"}
-                    </h4>
+                    <button onClick={() => handleViewHistory(c)} className="text-left hover:underline"><h4 className="text-xs font-bold text-white cursor-pointer">{c.name}</h4></button>
                     <p className="text-[10px] text-[#888888] mt-0.5">{c.phone}</p>
                   </div>
                 </div>
-
-                {isFrequent && (
-                  <span className="bg-[#10B981]/15 text-[#4edea3] text-[10px] uppercase font-bold py-0.5 px-2 rounded-sm border border-[#10B981]/25 flex items-center gap-1">
-                    <Star size={10} /> Frequent
-                  </span>
-                )}
-                {isOverdue && (
-                  <span className="bg-red-400/10 text-red-400 text-[10px] uppercase font-bold py-0.5 px-2 rounded-sm border border-red-500/20 flex items-center gap-1">
-                    <AlertTriangle size={10} /> Overdue
-                  </span>
-                )}
+                {isFrequent && <span className="bg-[#10B981]/15 text-[#4edea3] text-[10px] uppercase font-bold py-0.5 px-2 rounded-sm flex items-center gap-1"><Star size={10} /> Frequent</span>}
+                {isOverdue && <span className="bg-red-400/10 text-red-400 text-[10px] uppercase font-bold py-0.5 px-2 rounded-sm flex items-center gap-1"><AlertTriangle size={10} /> Overdue</span>}
               </div>
-
-              {/* Balances details */}
               <div className="grid grid-cols-2 gap-3 mb-5 text-xs">
-                <div className={`p-2.5 rounded-sm border ${
-                  isOverdue ? 'bg-red-500/5 border-red-500/10' : 'bg-[#0F0F0F] border-[#1F1F1F]'
-                }`}>
-                  <p className="text-[9px] text-[#888888] uppercase font-bold tracking-wider">Khata Balance</p>
-                  <p className={`font-semibold font-mono text-xs mt-1 ${
-                    (c.khataBalance ?? 0) < 0 ? 'text-red-400' :(c.khataBalance ?? 0) > 0 ? 'text-[#4edea3]' : 'text-gray-400'
-                  }`}>
-                    ₹ {(c.khataBalance ?? 0).toLocaleString('en-IN')}
-                  </p>
+                <div className="p-2.5 rounded-sm border bg-[#0F0F0F] border-[#1F1F1F]">
+                  <p className="text-[9px] text-[#888888] uppercase font-bold">Khata Balance</p>
+                  <p className={`font-semibold font-mono text-xs mt-1 ${isOwed ? 'text-red-400' : 'text-gray-400'}`}>₹ {formatMoney(khataOwed)}</p>
                 </div>
-
-                <div className="bg-[#0F0F0F] border border-[#1F1F1F] p-2.5 rounded-sm">
-                  <p className="text-[9px] text-[#888888] uppercase font-bold tracking-wider">Avg Basket</p>
-                  <p className="font-semibold text-white font-mono text-xs mt-1">
-                    {`₹ ${c.avgBasket ?? 0}`}
-                  </p>
+                <div className="p-2.5 rounded-sm border bg-[#0F0F0F] border-[#1F1F1F]">
+                  <p className="text-[9px] text-[#888888] uppercase font-bold">Avg Basket</p>
+                  <p className="font-semibold text-white font-mono text-xs mt-1">₹ {formatMoney(c.avgBasket ?? 0)}</p>
                 </div>
-
-                <div className="col-span-2 bg-[#0F0F0F] border border-[#1F1F1F] p-2.5 rounded-sm flex justify-between items-center text-xs">
-                  <p className="text-[9px] text-[#888888] uppercase font-bold tracking-wider">LIFETIME REVENUE</p>
-                  <p className="font-semibold text-white font-mono">₹ {(c.lifetimeSpend ?? 0).toLocaleString('en-IN')}</p>
+                <div className="col-span-2 p-2.5 rounded-sm border bg-[#0F0F0F] border-[#1F1F1F] flex justify-between">
+                  <p className="text-[9px] text-[#888888] uppercase font-bold">LIFETIME REVENUE</p>
+                  <p className="font-semibold text-white font-mono">₹ {formatMoney(c.lifetimeSpend ?? 0)}</p>
                 </div>
               </div>
-
-              {/* Action togglers */}
               <div className="flex gap-2">
-                <button 
-                  onClick={() => {
-                    const customerName = c.name || "Customer";
-                    const message = `Namaste ${customerName}, this is Suresh Sharma's Kirana store. Kindly settle your outstanding Khata balance of ₹${Math.abs(c.khataBalance ?? 0)}. Thank you!`;
-
-                    navigator.clipboard.writeText(message);
-                    alert("WhatsApp notification templates copied to your clipboard!");
-                  }}
-                  className="flex-1 bg-transparent border border-[#1F1F1F] hover:border-white text-xs font-semibold py-1.5 px-3 rounded-sm text-[#888888] hover:text-white flex items-center justify-center gap-1 transition-colors cursor-pointer"
-                >
-                  <Send size={12} /> WhatsApp
-                </button>
-                <button 
-                  onClick={() => setSettleCustomer(c)}
-                  className="flex-1 bg-[#1C1B1B] hover:bg-white hover:text-black border border-[#1F1F1F] text-xs font-semibold py-1.5 px-3 rounded-sm text-white flex items-center justify-center gap-1 transition-all cursor-pointer"
-                >
-                  <ScrollText size={12} /> Settle Khata
-                </button>
+                <button onClick={() => { navigator.clipboard.writeText(`Namaste ${c.name}, please settle Khata balance ₹${khataOwed}.`); alert("WhatsApp message copied!"); }} className="flex-1 bg-transparent border border-[#1F1F1F] hover:border-white text-xs font-semibold py-1.5 rounded-sm text-[#888888] hover:text-white flex items-center justify-center gap-1"><Send size={12} /> WhatsApp</button>
+                <button onClick={() => setSettleCustomer(c)} className="flex-1 bg-[#1C1B1B] hover:bg-white hover:text-black border border-[#1F1F1F] text-xs font-semibold py-1.5 rounded-sm text-white flex items-center justify-center gap-1"><ScrollText size={12} /> Settle Khata</button>
               </div>
             </div>
           );
         })}
       </div>
 
-      {/* Settle Khata Dialogue overlay */}
       {settleCustomer && (
         <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
           <form onSubmit={handleRecordPayment} className="bg-[#121212] border border-[#1F1F1F] rounded-md p-5 w-full max-w-sm space-y-4">
             <div className="flex justify-between items-center pb-2 border-b border-[#1F1F1F]">
-              <h3 className="text-xs font-semibold uppercase tracking-wider text-white">Record Khata Payback</h3>
-              <button type="button" onClick={() => setSettleCustomer(null)} className="text-[#888888] hover:text-white">
-                <span className="text-base">✕</span>
+              <h3 className="text-xs font-semibold text-white">Record Khata Payback</h3>
+              <button type="button" onClick={() => setSettleCustomer(null)} className="text-[#888888] hover:text-white">✕</button>
+            </div>
+            <p className="text-xs text-[#888888]">
+              Recording a payment reduces <b className="text-white">{settleCustomer.name}</b>'s open credit balance of ₹{formatMoney(Math.abs(settleCustomer.khataBalance ?? 0))}.
+            </p>
+            
+            <div className="space-y-3">
+              <input 
+                type="number" 
+                step="0.01"
+                value={settleAmount} 
+                onChange={(e) => setSettleAmount(e.target.value)} 
+                placeholder="Enter payment amount" 
+                className="w-full bg-[#0F0F0F] border border-[#1F1F1F] rounded-sm p-2 text-white" 
+                required 
+                min="0.01"
+              />
+              <input 
+                type="text" 
+                value={settleDesc} 
+                onChange={(e) => setSettleDesc(e.target.value)} 
+                className="w-full bg-[#0F0F0F] border border-[#1F1F1F] rounded-sm p-2 text-white" 
+                required 
+              />
+            </div>
+            
+            <div className="flex gap-2">
+              <button 
+                type="button" 
+                onClick={() => {
+                  const fullAmount = Math.abs(settleCustomer.khataBalance ?? 0);
+                  setSettleAmount(fullAmount.toFixed(2));
+                  setSettleDesc("Full khata settlement");
+                }}
+                className="flex-1 bg-amber-500/20 text-amber-400 border border-amber-500/30 text-xs font-semibold py-2 rounded-sm hover:bg-amber-500/30 transition"
+              >
+                Clear All Khata
+              </button>
+              <button 
+                type="submit" 
+                disabled={settleLoading} 
+                className="flex-1 bg-[#10B981] text-black font-semibold text-xs py-2 rounded-sm disabled:opacity-50"
+              >
+                {settleLoading ? "Processing..." : "Approve Payment"}
               </button>
             </div>
-
-            <p className="text-xs text-[#888888]">
-              Recording a payment reduces <b className="text-white">
-                {settleCustomer.name ?? (settleCustomer as any).customer_name ?? "Customer"}
-              </b>'s open credit balance of ₹{Math.abs(settleCustomer.khataBalance)}.
-            </p>
-
-            <div className="space-y-3 text-xs">
-              <div className="space-y-1">
-                <label className="text-[#888888]">Payment Amount Received (₹)</label>
-                <input 
-                  type="number"
-                  value={settleAmount}
-                  onChange={(e) => setSettleAmount(e.target.value)}
-                  placeholder="e.g. 1000"
-                  className="w-full bg-[#0F0F0F] border border-[#1F1F1F] rounded-sm p-2 text-white font-mono"
-                  required
-                  min="1"
-                />
-              </div>
-
-              <div className="space-y-1">
-                <label className="text-[#888888]">Transaction Notes</label>
-                <input 
-                  type="text"
-                  value={settleDesc}
-                  onChange={(e) => setSettleDesc(e.target.value)}
-                  className="w-full bg-[#0F0F0F] border border-[#1F1F1F] rounded-sm p-2 text-white"
-                  required
-                />
-              </div>
-            </div>
-
-            <button 
-              type="submit"
-              disabled={settleLoading}
-              className="w-full bg-[#10B981] text-black font-semibold text-xs py-2 rounded-sm cursor-pointer"
-            >
-              {settleLoading ? "Recording payment..." : "Approve Settlement Receipt"}
-            </button>
           </form>
+        </div>
+      )}
+
+      {selectedCustomerForHistory && (
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
+          <div className="bg-[#121212] border border-[#1F1F1F] rounded-md w-full max-w-4xl max-h-[85vh] flex flex-col overflow-hidden">
+            <div className="p-4 border-b border-[#1F1F1F] flex justify-between items-center bg-[#161616]">
+              <div><h3 className="text-sm font-semibold text-white">Ledger: {selectedCustomerForHistory.name}</h3><p className="text-[10px] text-[#888888]">{selectedCustomerForHistory.phone}</p></div>
+              <button onClick={() => setSelectedCustomerForHistory(null)} className="text-[#888888] hover:text-white"><X size={18} /></button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-4">
+              {ordersLoading ? <p className="text-xs text-center text-[#888888] py-10">Loading ledger...</p> : ledgerEntries.length === 0 ? <p className="text-xs text-center text-[#888888] py-10">No transactions found.</p> : (
+                <div className="space-y-3">
+                  <div className="grid grid-cols-12 gap-2 text-[10px] font-bold text-[#888888] uppercase border-b border-[#1F1F1F] pb-2">
+                    <div className="col-span-3">Date</div><div className="col-span-5">Description</div><div className="col-span-2 text-right">Amount</div><div className="col-span-2 text-right">Balance</div>
+                  </div>
+                  {ledgerEntries.map(entry => {
+                    const isPaidOrder = entry.type === 'paid_order';
+                    const isKhataOrder = entry.type === 'order';
+                    const isPayment = entry.type === 'payment';
+                    let amountDisplay = '';
+                    let amountClass = 'text-white';
+                    if (isPaidOrder) {
+                      amountDisplay = '₹0.00';
+                    } else if (isKhataOrder) {
+                      amountDisplay = `+ ₹${safeToFixed(entry.amount)}`;
+                      amountClass = 'text-red-400';
+                    } else {
+                      amountDisplay = `- ₹${safeToFixed(-entry.amount)}`;
+                      amountClass = 'text-green-500';
+                    }
+                    const balanceColor = entry.runningBalance === 0 ? 'text-green-500' : 'text-red-500';
+                    return (
+                      <div key={entry.id} className="grid grid-cols-12 gap-2 text-xs border-b border-[#1F1F1F] py-2">
+                        <div className="col-span-3 text-[#888888]">{new Date(entry.date).toLocaleString()}</div>
+                        <div className="col-span-5">
+                          {entry.type !== 'payment' ? (
+                            <>
+                              {entry.items && entry.items.length > 0 ? entry.items.map((item, idx) => (
+                                <div key={idx}>{item.productName} x{item.quantity} @ ₹{safeToFixed(item.price)}</div>
+                              )) : <span className="text-[#888888]">No items recorded</span>}
+                              <div className="text-[9px] text-[#888888] font-mono mt-0.5">{entry.description}</div>
+                            </>
+                          ) : (
+                            <div className="text-white">Payment: {entry.description}</div>
+                          )}
+                        </div>
+                        <div className={`col-span-2 text-right font-mono ${amountClass}`}>{amountDisplay}</div>
+                        <div className={`col-span-2 text-right font-mono font-bold ${balanceColor}`}>₹{safeToFixed(entry.runningBalance)}</div>
+                      </div>
+                    );
+                  })}
+                  <div className="grid grid-cols-12 gap-2 text-xs pt-3 border-t border-[#1F1F1F] mt-2">
+                    <div className="col-span-8 text-right font-bold text-white">Current Outstanding:</div>
+                    <div className="col-span-2 text-right font-bold font-mono text-red-500">
+                      ₹{formatMoney(Math.abs(selectedCustomerForHistory.khataBalance ?? 0))}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
         </div>
       )}
     </div>

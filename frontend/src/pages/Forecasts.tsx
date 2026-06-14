@@ -26,38 +26,38 @@ export default function Forecasts() {
     setLoading(false);
   };
 
-  const handleProcureDraft = async (forecast: Forecast) => {
-    setProcureSuccessId(null);
-    try {
-      // Create draft Purchase Order
-      // Prefer canonicalProductId if provided by the ML payload. Otherwise use forecast.productId.
-      const prodId = (forecast as any).canonicalProductId || forecast.productId;
-      const usedProductId = prodId || forecast.productId;
+const handleProcureDraft = async (forecast: Forecast) => {
+  setProcureSuccessId(null);
+  try {
+    // Try to find the actual product ID from inventory
+    const allProducts = await inventoryService.getInventory();
+    const matchedProduct = allProducts.find(p => 
+      p.name.toLowerCase() === forecast.product_name.toLowerCase() ||
+      p.sku.toLowerCase() === forecast.product_name.toLowerCase()
+    );
+    const usedProductId = matchedProduct?.id || (forecast as any).canonicalProductId || forecast.productId;
 
-      await suppliersService.createPurchaseOrder({
-        supplierId: "sup-1", // Hind Unilever default
-        supplierName: "Hindustan Unilever",
-        items: [
-          {
-            productId: usedProductId,
-            productName: forecast.product_name,
-            quantity: forecast.recommended_reorder_quantity,
-            costPrice: 210.00
-          }
-        ],
-        totalAmount: forecast.recommended_reorder_quantity * 160 // approximate B2B rate
-      });
+    await suppliersService.createPurchaseOrder({
+      supplierId: "sup-1",
+      supplierName: "Hindustan Unilever",
+      items: [
+        {
+          productId: usedProductId,
+          productName: forecast.product_name,
+          quantity: forecast.recommended_reorder_quantity,
+          costPrice: 210.00
+        }
+      ],
+      totalAmount: forecast.recommended_reorder_quantity * 160
+    });
 
-      setProcuredIdList(prev => [...prev, forecast.productId]);
-      setProcureSuccessId(forecast.productId);
-      
-      setTimeout(() => {
-        setProcureSuccessId(null);
-      }, 3000);
-    } catch (err) {
-      alert("Error generating replenishment PO.");
-    }
-  };
+    setProcuredIdList(prev => [...prev, forecast.productId]);
+    setProcureSuccessId(forecast.productId);
+    setTimeout(() => setProcureSuccessId(null), 3000);
+  } catch (err) {
+    alert("Error generating replenishment PO.");
+  }
+};
 
   return (
     <div className="space-y-6">
@@ -78,10 +78,10 @@ export default function Forecasts() {
       {/* Main Grid Forecast items */}
       <div className="space-y-4">
           {loading ? (
-           <p className="text-xs text-[#888888] p-10 text-center font-mono animate-pulse">Calculating stock suggestions...</p>
-         ) : forecasts.length === 0 ? (
-           <p className="text-xs text-[#888888] p-10 text-center font-mono">No stock suggestions.</p>
-         ) : (
+            <p className="text-xs text-[#888888] p-10 text-center font-mono animate-pulse">Calculating stock suggestions...</p>
+          ) : forecasts.length === 0 ? (
+            <p className="text-xs text-[#888888] p-10 text-center font-mono">No stock suggestions.</p>
+          ) : (
           forecasts.map((f, idx) => {
             const isStockoutImminent = f.predicted_stockout_days <= 1;
             const hasProcured = procuredIdList.includes(f.productId);
@@ -184,4 +184,4 @@ export default function Forecasts() {
       </div>
     </div>
   );
-}
+  }

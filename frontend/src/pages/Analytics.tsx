@@ -183,7 +183,7 @@ export default function AnalyticsView() {
                 <h3 className="text-xs font-semibold uppercase tracking-wider text-white">Revenue Leaders (Top FMCG items)</h3>
               </div>
 
-              <div className="flex-1 w-full h-full mt-2">
+              <div className="w-full h-[300px] mt-2">
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart
                     data={data.topProducts}

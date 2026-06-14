@@ -99,6 +99,7 @@ export default function NewOrderModal({ onClose, onSuccess }: NewOrderModalProps
       await ordersService.createOrder({
         customerId: selectedCustomerId || undefined,
         customerName: selectedCustomer ? selectedCustomer.name : 'Walk-in Customer',
+        customerPhone: selectedCustomer ? selectedCustomer.phone : '',   // add this line
         items,
         totalAmount,
         status: 'Processed',
