@@ -1,0 +1,334 @@
+{
+  "collections": {
+    "kirana_ai.customers": {
+      "ns": "kirana_ai.customers",
+      "jsonSchema": {
+        "bsonType": "object",
+        "required": [
+          "_id",
+          "customer_name",
+          "customer_phone",
+          "last_order_at",
+          "lifetime_spend",
+          "order_count",
+          "store_id"
+        ],
+        "properties": {
+          "_id": {
+            "bsonType": "objectId"
+          },
+          "customer_name": {
+            "bsonType": "string"
+          },
+          "customer_phone": {
+            "bsonType": "string"
+          },
+          "last_order_at": {
+            "bsonType": "date"
+          },
+          "lifetime_spend": {
+            "bsonType": "double"
+          },
+          "order_count": {
+            "bsonType": "int"
+          },
+          "store_id": {
+            "bsonType": "string"
+          }
+        }
+      }
+    },
+    "kirana_ai.khata": {
+      "ns": "kirana_ai.khata",
+      "jsonSchema": {
+        "bsonType": "object",
+        "required": [
+          "_id",
+          "amount",
+          "customerId",
+          "customerName",
+          "date",
+          "description",
+          "id",
+          "type"
+        ],
+        "properties": {
+          "_id": {
+            "bsonType": "objectId"
+          },
+          "amount": {
+            "bsonType": "int"
+          },
+          "customerId": {
+            "bsonType": "string"
+          },
+          "customerName": {
+            "bsonType": "string"
+          },
+          "date": {
+            "bsonType": "date"
+          },
+          "description": {
+            "bsonType": "string"
+          },
+          "id": {
+            "bsonType": "string"
+          },
+          "type": {
+            "bsonType": "string"
+          }
+        }
+      }
+    },
+    "kirana_ai.orders": {
+      "ns": "kirana_ai.orders",
+      "jsonSchema": {
+        "bsonType": "object",
+        "required": [
+          "_id",
+          "items",
+          "status"
+        ],
+        "properties": {
+          "_id": {
+            "bsonType": "objectId"
+          },
+          "created_at": {
+            "bsonType": "date"
+          },
+          "createdAt": {
+            "bsonType": "date"
+          },
+          "customer_name": {
+            "bsonType": "string"
+          },
+          "customer_phone": {
+            "bsonType": "string"
+          },
+          "customerName": {
+            "bsonType": "string"
+          },
+          "discount_applied": {
+            "bsonType": "double"
+          },
+          "id": {
+            "bsonType": "string"
+          },
+          "input_type": {
+            "bsonType": "string"
+          },
+          "items": {
+            "bsonType": "array",
+            "items": {
+              "bsonType": "object",
+              "properties": {
+                "line_total": {
+                  "bsonType": "double"
+                },
+                "name": {
+                  "bsonType": "string"
+                },
+                "price": {
+                  "bsonType": "int"
+                },
+                "productId": {
+                  "bsonType": "string"
+                },
+                "productName": {
+                  "bsonType": "string"
+                },
+                "qty": {
+                  "bsonType": "double"
+                },
+                "quantity": {
+                  "bsonType": "int"
+                },
+                "unit": {
+                  "bsonType": "string"
+                },
+                "unit_price": {
+                  "bsonType": "double"
+                }
+              }
+            }
+          },
+          "language": {
+            "bsonType": "string"
+          },
+          "order_id": {
+            "bsonType": "string"
+          },
+          "original_total": {
+            "bsonType": "double"
+          },
+          "payment_mode": {
+            "bsonType": "string"
+          },
+          "raw_input_url": {
+            "bsonType": "null"
+          },
+          "shopkeeper_phone": {
+            "bsonType": "string"
+          },
+          "source": {
+            "bsonType": "string"
+          },
+          "split_with": {
+            "bsonType": "array"
+          },
+          "status": {
+            "bsonType": "string"
+          },
+          "store_id": {
+            "bsonType": "string"
+          },
+          "total_amount": {
+            "bsonType": "double"
+          },
+          "totalAmount": {
+            "bsonType": "int"
+          }
+        }
+      }
+    },
+    "kirana_ai.products": {
+      "ns": "kirana_ai.products",
+      "jsonSchema": {
+        "bsonType": "object",
+        "required": [
+          "_id",
+          "category",
+          "costPrice",
+          "id",
+          "margin",
+          "name",
+          "sku",
+          "status",
+          "stockQuantity",
+          "supplierId",
+          "supplierName",
+          "unitPrice"
+        ],
+        "properties": {
+          "_id": {
+            "bsonType": "objectId"
+          },
+          "category": {
+            "bsonType": "string"
+          },
+          "costPrice": {
+            "bsonType": [
+              "int",
+              "double"
+            ]
+          },
+          "id": {
+            "bsonType": "string"
+          },
+          "margin": {
+            "bsonType": [
+              "double",
+              "int"
+            ]
+          },
+          "name": {
+            "bsonType": "string"
+          },
+          "sku": {
+            "bsonType": "string"
+          },
+          "status": {
+            "bsonType": "string"
+          },
+          "stockQuantity": {
+            "bsonType": "int"
+          },
+          "supplierId": {
+            "bsonType": "string"
+          },
+          "supplierName": {
+            "bsonType": "string"
+          },
+          "unitPrice": {
+            "bsonType": "int"
+          }
+        }
+      }
+    },
+    "kirana_ai.purchase_orders": {
+      "ns": "kirana_ai.purchase_orders",
+      "jsonSchema": {
+        "bsonType": "object",
+        "required": [
+          "_id",
+          "createdAt",
+          "id",
+          "items",
+          "status",
+          "supplierId",
+          "supplierName",
+          "totalAmount"
+        ],
+        "properties": {
+          "_id": {
+            "bsonType": "objectId"
+          },
+          "createdAt": {
+            "bsonType": "date"
+          },
+          "deliveryProgress": {
+            "bsonType": "int"
+          },
+          "estimatedDelivery": {
+            "bsonType": "string"
+          },
+          "id": {
+            "bsonType": "string"
+          },
+          "items": {
+            "bsonType": "array",
+            "items": {
+              "bsonType": "object",
+              "properties": {
+                "costPrice": {
+                  "bsonType": [
+                    "int",
+                    "double"
+                  ]
+                },
+                "productId": {
+                  "bsonType": "string"
+                },
+                "productName": {
+                  "bsonType": "string"
+                },
+                "quantity": {
+                  "bsonType": "int"
+                }
+              },
+              "required": [
+                "costPrice",
+                "productId",
+                "productName",
+                "quantity"
+              ]
+            }
+          },
+          "status": {
+            "bsonType": "string"
+          },
+          "supplierId": {
+            "bsonType": "string"
+          },
+          "supplierName": {
+            "bsonType": "string"
+          },
+          "totalAmount": {
+            "bsonType": "int"
+          }
+        }
+      }
+    }
+  },
+  "relationships": []
+}

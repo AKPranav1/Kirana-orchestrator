@@ -18,6 +18,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from dotenv import load_dotenv
+from pymongo import ReturnDocument  
 
 from mongo_connector import (
     log_order as db_log_order,
@@ -47,7 +48,7 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # tighten to your Vite origin in production
+    allow_origins=["http://localhost:3000", "http://localhost:8001", "http://localhost:8002"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -435,27 +436,26 @@ def dashboard_metrics():
 # ── Read: Flattened Khata Transactions (new) ───────────────────────────────────
 @app.get("/khata", tags=["read"])
 def list_khata_transactions(store_id: str = "store_001"):
-    """Return a flattened list of khata transactions across all customers for the dashboard/client.
-    Each khata document stores an `entries` array — this endpoint normalizes them to individual
-    transaction objects so the frontend can display a chronological ledger stream.
-    """
+    """..."""
     db = get_db()
     txns = []
     cursor = db["khata"].find(
-        {"store_id": store_id}, {"_id": 0, "customer_name": 1, "entries": 1}
+        {"store_id": store_id}, {"_id": 0, "customer_name": 1, "entries": 1, "total_outstanding": 1}
     )
     for doc in cursor:
         customer_name = doc.get("customer_name")
+        outstanding = doc.get("total_outstanding", 0)
         for idx, e in enumerate(doc.get("entries", [])):
+            is_payment = e.get("settled", False)
             txns.append(
                 {
                     "id": f"{customer_name}-{e.get('order_id')}-{idx}",
-                    "customerId": customer_name,  # note: customerName used as id here for compatibility
+                    "customerId": customer_name,
                     "customerName": customer_name,
-                    "type": "credit",
+                    "type": "payment" if is_payment else "credit",
                     "amount": e.get("amount", 0),
                     "date": e.get("date"),
-                    "description": f"Order {e.get('order_id')}",
+                    "description": e.get("description") or f"Order {e.get('order_id')}",
                 }
             )
     # sort by date descending
@@ -547,37 +547,74 @@ def create_customer(customer: dict):
 # --- Khata transaction (ad-hoc) --------------------------------------------
 @app.post("/khata/tx", tags=["write"])
 def post_khata_tx(tx: dict):
-    """Payload: { customerId, type: 'credit'|'payment', amount, description }
-    customerId is treated as customer_name for compatibility with current stores.
-    """
+    """Payload: { customerId, type: 'credit'|'payment', amount, description }"""
+    from pymongo import ReturnDocument
     db = get_db()
+    
     name = tx.get("customerId") or tx.get("customerName") or tx.get("customer_name")
     if not name:
         raise HTTPException(status_code=400, detail="customerId required")
+    
     ttype = tx.get("type", "credit")
     amount = float(tx.get("amount", 0))
     now = datetime.now(timezone.utc)
-
-    entry = {"order_id": f"tx-{uuid.uuid4()}", "amount": amount, "date": now.isoformat(), "settled": ttype == "payment", "description": tx.get("description", "")}
-
-    if ttype == "credit":
-        from pymongo import ReturnDocument
-        res = db["khata"].find_one_and_update(
-                {"customer_name": name},
-                {"$push": {"entries": entry}, "$inc": {"total_outstanding": amount}, "$set": {"last_updated": now}, "$setOnInsert": {"customer_name": name, "store_id": "store_001", "reminder_count": 0}},
-                upsert=True,
-                return_document=True,
-        )
-    else:
-        # payment reduces outstanding
-        res = db["khata"].find_one_and_update(
+    
+    print(f"[khata/tx] Customer: {name}, Type: {ttype}, Amount: {amount}")
+    
+    entry = {
+        "order_id": f"tx-{uuid.uuid4()}",
+        "amount": amount,
+        "date": now.isoformat(),
+        "description": tx.get("description", "")
+    }
+    
+    if ttype == "payment":
+        # REDUCE the outstanding balance
+        # First get current balance
+        current_doc = db["khata"].find_one({"customer_name": name})
+        current_outstanding = current_doc.get("total_outstanding", 0) if current_doc else 0
+        print(f"[khata/tx] Current outstanding: {current_outstanding}")
+        
+        # Only subtract up to current outstanding (never negative)
+        reduce_by = min(amount, current_outstanding)
+        entry["settled"] = True
+        
+        result = db["khata"].find_one_and_update(
             {"customer_name": name},
-            {"$push": {"entries": entry}, "$inc": {"total_outstanding": -amount}, "$set": {"last_updated": now}},
+            {
+                "$push": {"entries": entry},
+                "$inc": {"total_outstanding": -reduce_by},
+                "$set": {"last_updated": now}
+            },
             upsert=True,
-            return_document=ReturnDocument.AFTER,
+            return_document=ReturnDocument.AFTER
         )
-
-    transaction = {"id": entry["order_id"], "customerId": name, "customerName": name, "type": ttype, "amount": amount, "date": entry["date"], "description": entry["description"]}
+        print(f"[khata/tx] Payment applied: reduced by {reduce_by}, new outstanding: {result.get('total_outstanding', 0)}")
+    else:
+        # ADD to outstanding (credit)
+        entry["settled"] = False
+        result = db["khata"].find_one_and_update(
+            {"customer_name": name},
+            {
+                "$push": {"entries": entry},
+                "$inc": {"total_outstanding": amount},
+                "$set": {"last_updated": now},
+                "$setOnInsert": {"customer_name": name, "store_id": "store_001", "reminder_count": 0}
+            },
+            upsert=True,
+            return_document=ReturnDocument.AFTER
+        )
+        print(f"[khata/tx] Credit added: +{amount}, new outstanding: {result.get('total_outstanding', 0)}")
+    
+    transaction = {
+        "id": entry["order_id"],
+        "customerId": name,
+        "customerName": name,
+        "type": ttype,
+        "amount": amount,
+        "date": entry["date"],
+        "description": entry["description"]
+    }
     return {"status": "success", "transaction": transaction}
 
 
