@@ -1,13 +1,18 @@
 import os
 import httpx
+import tempfile
+import asyncio
 from typing import Tuple
 from dotenv import load_dotenv
+from sarvamai import SarvamAI
 
 load_dotenv()
 
-SARVAM_API_KEY    = os.getenv("SARVAM_API_KEY")
-SARVAM_STT_URL    = os.getenv("SARVAM_STT_URL",    "https://api.sarvam.ai/speech-to-text")
-SARVAM_VISION_URL = os.getenv("SARVAM_VISION_URL", "https://api.sarvam.ai/vision/ocr")
+SARVAM_API_KEY = os.getenv("SARVAM_API_KEY")
+SARVAM_STT_URL = os.getenv("SARVAM_STT_URL", "https://api.sarvam.ai/speech-to-text")
+# Optional tuning knobs
+SARVAM_VISION_PREFER_HANDWRITING = os.getenv("SARVAM_VISION_PREFER_HANDWRITING", "1")
+SARVAM_VISION_LANGUAGE = os.getenv("SARVAM_VISION_LANGUAGE")
 
 # ---------------------------------------------------------------------------
 # Sarvam language code → BCP-47 locale used by the STT API
@@ -76,42 +81,42 @@ async def speech_to_text(
         resp = r.json()
         return resp.get("transcript", ""), resp
 
+def _run_sarvam_vision_sync(image_path: str, api_key: str) -> str:
+    """Synchronous helper — minimal, proven-working Sarvam SDK call."""
+    client = SarvamAI(api_subscription_key=api_key)
+    response = client.document_digitization.digitize(
+        file_path=image_path,
+        language="hi-IN",
+        output_format="md",
+    )
+    print(f"[SARVAM DEBUG] pages count: {len(getattr(response, 'pages', []))}")
+    extracted_text = ""
+    for page in getattr(response, "pages", []):
+        for block in getattr(page, "blocks", []):
+            block_text = getattr(block, "text", "")
+            print(f"[SARVAM DEBUG] block text: {block_text!r}")
+            extracted_text += block_text + "\n"
+    return extracted_text
 
-async def vision_ocr(
-    image_bytes: bytes,
-    language_code: str = "unknown",
-) -> Tuple[str, dict]:
-    """
-    Extract text from an image via Sarvam's vision/document OCR.
-
-    Args:
-        image_bytes:   Raw image content (JPEG / PNG).
-        language_code: 2-letter Sarvam language code — hints the OCR engine
-                       toward the expected script for better accuracy on
-                       low-resolution or handwritten images.
-
-    Returns:
-        (extracted_text_string, raw_api_response_dict)
-
-    NOTE: As of current Sarvam docs, image/document OCR ("Sarvam Vision" /
-    Document Intelligence) is an async job-based API (create job -> upload
-    file -> trigger processing -> poll status -> download result ZIP),
-    not a single synchronous POST with a file like this. The endpoint
-    `https://api.sarvam.ai/vision/ocr` used below is likely stale and may
-    return 404/400 in production. This mock path keeps text/audio orders
-    unblocked; if you hit errors here on a real image order, capture the
-    response body and we can wire up the correct async flow.
-    """
-    if not SARVAM_API_KEY:
+async def vision_ocr(image_bytes: bytes) -> Tuple[str, dict]:
+    """Async wrapper for the Sarvam Vision SDK."""
+    api_key = os.getenv("SARVAM_API_KEY")
+    if not api_key:
+        print("[WARNING] Missing Sarvam API Key. Returning mock data.")
         return "2 kilo aata, ek doodh", {"mock": True}
 
-    headers = {"api-subscription-key": SARVAM_API_KEY}
-    data    = {"language_code": _locale(language_code)}
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as tmp:
+        tmp.write(image_bytes)
+        tmp_path = tmp.name
 
-    async with httpx.AsyncClient(timeout=30) as client:
-        files = {"file": ("image.jpg", image_bytes, "image/jpeg")}
-        r = await client.post(SARVAM_VISION_URL, headers=headers, files=files, data=data)
-        if r.status_code >= 400:
-            raise RuntimeError(f"Sarvam Vision OCR {r.status_code}: {r.text[:300]}")
-        resp = r.json()
-        return resp.get("text", ""), resp
+    try:
+        print(f"[SARVAM OCR] Processing image, size={len(image_bytes)} bytes")
+        extracted_text = await asyncio.to_thread(_run_sarvam_vision_sync, tmp_path, api_key)
+        print(f"[SARVAM SUCCESS] Extracted: {extracted_text[:120]!r}")
+        return extracted_text, {"status": "success"}
+    except Exception as e:
+        print(f"[SARVAM EXCEPTION] {e}")
+        return "", {"error": str(e)}
+    finally:
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
