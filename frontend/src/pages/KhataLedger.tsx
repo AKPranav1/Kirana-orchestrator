@@ -7,7 +7,6 @@ import React, { useState, useEffect } from 'react';
 import { Wallet, Search, Filter, MessageSquare, Download, AlertCircle, ArrowUpRight, ArrowDownLeft } from 'lucide-react';
 import { KhataTransaction, Customer } from '../types';
 import { apiClient } from '../services/api';
-import { mockKhataAgeing } from '../data/analytics';
 
 export default function KhataLedger() {
   const [txns, setTxns] = useState<KhataTransaction[]>([]);
@@ -15,6 +14,7 @@ export default function KhataLedger() {
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState<'all' | 'credit' | 'payment'>('all');
   const [loading, setLoading] = useState(true);
+  const [ageing, setAgeing] = useState<any[]>([]);
 
   useEffect(() => {
     loadLedger();
@@ -26,6 +26,12 @@ export default function KhataLedger() {
     const custs = await apiClient.getCustomers();
     setTxns(list);
     setCustomers(custs);
+    try {
+      const analytics = await apiClient.getAnalytics();
+      setAgeing((analytics as any).khata_ageing || []);
+    } catch (e) {
+      setAgeing([]);
+    }
     setLoading(false);
   };
 
@@ -92,9 +98,9 @@ export default function KhataLedger() {
           <div>
             <span className="text-[10px] font-bold text-[#888888] uppercase tracking-wider block">Credit Ageing Cohort Analysis (Overdue)</span>
             <div className="grid grid-cols-4 gap-4 mt-6 text-xs">
-              {mockKhataAgeing.map((co, idx) => {
-                const maxAmt = Math.max(...mockKhataAgeing.map(c => c.amount));
-                const heightPercentage = (co.amount / maxAmt) * 100;
+              {ageing.map((co, idx) => {
+                const maxAmt = Math.max(...ageing.map(c => c.amount || 0));
+                const heightPercentage = maxAmt > 0 ? ((co.amount || 0) / maxAmt) * 100 : 0;
                 return (
                   <div key={idx} className="flex flex-col items-center justify-end h-24">
                     <span className="text-[10px] font-semibold text-white font-mono">₹{co.amount.toLocaleString()}</span>

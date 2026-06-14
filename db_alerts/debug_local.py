@@ -37,7 +37,7 @@ def test_mongo():
     print("\n" + "="*55)
     print("TEST: MongoDB — log_order + khata split")
     print("="*55)
-    from mongo import log_order
+    from mongo_connector import log_order
     try:
         order_id = log_order(SAMPLE_ORDER, SHOPKEEPER_PHONE)
         print(f"\n✅ PASS — order_id = {order_id}")
@@ -53,11 +53,11 @@ def test_elevenlabs_only():
     print("\n" + "="*55)
     print("TEST: ElevenLabs — generate audio")
     print("="*55)
-    from alerts import format_alert_text, generate_audio
+    from alerts import create_text_bill, generate_audio
     try:
-        text     = format_alert_text(SAMPLE_ORDER)
+        text     = create_text_bill(SAMPLE_ORDER)
         print(f"   Alert text: \"{text}\"")
-        filename = generate_audio(text)
+        filename = generate_audio(text, {"stability": 0.7, "similarity_boost": 0.75, "style": 0.0, "use_speaker_boost": True})
         print(f"\n✅ PASS — saved to audio_files/{filename}")
         print("   Play the file to verify audio quality.")
         return True
@@ -71,9 +71,9 @@ def test_full_alert():
     print("TEST: Full alert pipeline (ElevenLabs + Twilio)")
     print("="*55)
     print(f"   Sending to: {SHOPKEEPER_PHONE}")
-    from alerts import send_alert
+    from alerts import send_receipt_only
     try:
-        send_alert(SAMPLE_ORDER, SHOPKEEPER_PHONE)
+        send_receipt_only(SAMPLE_ORDER, SHOPKEEPER_PHONE)
         print(f"\n✅ PASS — Check WhatsApp on {SHOPKEEPER_PHONE}")
         return True
     except Exception as e:
@@ -85,13 +85,13 @@ def test_end_to_end():
     print("\n" + "="*55)
     print("TEST: Full end-to-end (MongoDB + ElevenLabs + Twilio)")
     print("="*55)
-    from mongo  import log_order
-    from alerts import send_alert
+    from mongo_connector import log_order
+    from alerts import send_receipt_only
     try:
         order_id = log_order(SAMPLE_ORDER, SHOPKEEPER_PHONE)
         print(f"   MongoDB ✅  order_id={order_id}")
-        send_alert(SAMPLE_ORDER, SHOPKEEPER_PHONE)
-        print(f"   Alert  ✅  WhatsApp sent to {SHOPKEEPER_PHONE}")
+        send_receipt_only(SAMPLE_ORDER, SHOPKEEPER_PHONE)
+        print(f"   Alert  ✅  WhatsApp (text) sent to {SHOPKEEPER_PHONE}")
         print(f"\n✅ PASS — Full pipeline complete!")
         return True
     except Exception as e:

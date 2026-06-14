@@ -1,13 +1,374 @@
 {
   "store_default": {
-    "aata":   {"canonical": "Wheat Flour",    "unit": "kg",     "aliases": ["atta", "aata", "आटा", "gehun atta"]},
-    "doodh":  {"canonical": "Milk",           "unit": "litre",  "aliases": ["milk", "दूध", "doodh"]},
-    "chawal": {"canonical": "Rice",           "unit": "kg",     "aliases": ["rice", "चावल", "chawal"]},
-    "chini":  {"canonical": "Sugar",          "unit": "kg",     "aliases": ["sugar", "चीनी", "chini"]},
-    "namak":  {"canonical": "Salt",           "unit": "kg",     "aliases": ["salt", "नमक", "namak"]},
-    "tel":    {"canonical": "Cooking Oil",    "unit": "litre",  "aliases": ["oil", "तेल", "sarso tel", "tel"]},
-    "sabun":  {"canonical": "Soap",           "unit": "piece",  "aliases": ["soap", "साबुन", "sabun"]},
-    "maggi":  {"canonical": "Instant Noodles","unit": "packet", "aliases": ["noodles", "मैगी", "maggi"]},
-    "chai":   {"canonical": "Tea",            "unit": "gm",     "aliases": ["tea", "चाय", "chai", "chai patti"]}
+    "chawal": {
+      "canonical": "Rice",
+      "unit": "kg",
+      "aliases": [
+        "rice", "चावल", "chawal",
+        "akki", "akki kalsi", "akki haalu",
+        "arisi", "arishi",
+        "biyyam", "biyyamu",
+        "chaal", "bhaat", "tandul",
+        "chal", "chawl",
+        "dhan", "saadam",
+        "choru", "choru kalsi",
+        "bhata", "odisha rice"
+      ]
+    },
+    "aata": {
+      "canonical": "Wheat Flour",
+      "unit": "kg",
+      "aliases": [
+        "atta", "aata", "आटा", "gehun atta", "wheat flour", "wheat",
+        "godhi hittu", "godhihittu", "hittu", "godhi hudi",
+        "kothumai maavu", "kodumai maavu",
+        "godhumalu pindi", "godhuma pindi",
+        "gahu pith", "gahu no lot",
+        "atta maida", "gom pith",
+        "kanak da atta", "gehu da atta",
+        "godhambu maav", "gothambhu maavu",
+        "gahu atta", "godhuma hittu"
+      ]
+    },
+    "doodh": {
+      "canonical": "Milk",
+      "unit": "litre",
+      "aliases": [
+        "milk", "दूध", "doodh", "dudh",
+        "haalu", "halu", "haalu packet",
+        "paal", "paalu", "paallu", "paal packet",
+        "paalu packet", "palu",
+        "doodh packet", "doodh pouch",
+        "doi", "dudha",
+        "paal pouch", "paalkatti",
+        "ksheerama", "ksheeram",
+        "dudh pouch", "dudh packet"
+      ]
+    },
+    "chini": {
+      "canonical": "Sugar",
+      "unit": "kg",
+      "aliases": [
+        "sugar", "चीनी", "chini", "cheeni",
+        "sakkare", "sakkarai", "sakkarey",
+        "panchakaram", "chakkara", "chakkarai",
+        "khand", "sakar", "shakkar",
+        "chucker", "mishri",
+        "sarkara", "sarkkara",
+        "chinni", "shakar"
+      ]
+    },
+    "namak": {
+      "canonical": "Salt",
+      "unit": "kg",
+      "aliases": [
+        "salt", "नमक", "namak",
+        "uppu", "uppu kalsi", "uppina kalsi",
+        "uppu packet",
+        "lavana", "lavanam",
+        "lon", "noon", "meeta",
+        "loon", "nimak",
+        "uppinakayi", "lavanapu",
+        "noon packet", "namak packet"
+      ]
+    },
+    "tel": {
+      "canonical": "Cooking Oil",
+      "unit": "litre",
+      "aliases": [
+        "oil", "तेल", "sarso tel", "tel",
+        "enne", "yenne", "yenne bottle", "enne bottle",
+        "ennai", "ennai bottle",
+        "nune", "nune bottle", "nuney",
+        "taila", "tel bottle",
+        "sunflower oil", "groundnut oil", "soybean oil",
+        "refined oil", "vanaspati",
+        "kadalenney", "nallennai",
+        "sunpholer oil", "sarson tel",
+        "ella enne", "tilakaada enne"
+      ]
+    },
+    "sarso_tel": {
+      "canonical": "Mustard Oil",
+      "unit": "litre",
+      "aliases": [
+        "mustard oil", "sarson ka tel", "sarso tel",
+        "aavala enne", "kadugu ennai",
+        "avalu nune", "aavala nune",
+        "kadugu oil", "aavalu nune",
+        "mohori tel", "rai nu tel",
+        "sorisha tel", "sorse tel",
+        "kadugu", "rai"
+      ]
+    },
+    "sabun": {
+      "canonical": "Soap",
+      "unit": "piece",
+      "aliases": [
+        "soap", "साबुन", "sabun",
+        "saabonu", "saabun", "saaboo",
+        "saappu", "saabbu", "saabbu tukku",
+        "sabon", "saboon",
+        "hannusu", "savon",
+        "sabun tukda", "bath soap",
+        "body soap", "toilet soap"
+      ]
+    },
+    "maggi": {
+      "canonical": "Instant Noodles",
+      "unit": "packet",
+      "aliases": [
+        "noodles", "मैगी", "maggi",
+        "maagi", "noodils", "instant noodles",
+        "noodls", "noodle",
+        "maggi packet", "maagi packet",
+        "nooodals", "2 minute noodles",
+        "top ramen", "yippee", "sunfeast yippee"
+      ]
+    },
+    "chai": {
+      "canonical": "Tea",
+      "unit": "gm",
+      "aliases": [
+        "tea", "चाय", "chai", "chai patti",
+        "chaha", "tee", "chaa",
+        "thaeyilai", "theyilai", "teyilai",
+        "teaku", "tea patti",
+        "chaha patti", "chai powder",
+        "tea powder", "dust tea",
+        "red label", "tata tea", "brooke bond",
+        "cha", "caha"
+      ]
+    },
+    "dal": {
+      "canonical": "Dal",
+      "unit": "kg",
+      "aliases": [
+        "dal", "daal", "lentils", "दाल",
+        "bele", "bele kalsi", "togari bele", "hesaru bele", "kadale bele",
+        "paruppu", "thuvaram paruppu", "kadala paruppu",
+        "pappu", "kandi pappu", "pesara pappu",
+        "dali", "moog dal", "moong dal",
+        "tur dal", "toor dal", "masoor dal",
+        "chana dal", "urad dal",
+        "matar dal", "rajma",
+        "musur dal", "muger dal",
+        "masur dal", "arhar dal",
+        "dhal", "daal packet"
+      ]
+    },
+    "curd": {
+      "canonical": "Curd",
+      "unit": "kg",
+      "aliases": [
+        "curd", "yogurt", "दही", "dahi",
+        "mosaru", "mosarnu", "mosru",
+        "thayir", "tayir", "thair",
+        "perugu", "perug",
+        "doi", "dahi",
+        "dahi packet", "dahi cup",
+        "yoghurt", "set curd",
+        "maththa", "matha"
+      ]
+    },
+    "paneer": {
+      "canonical": "Paneer",
+      "unit": "gm",
+      "aliases": [
+        "paneer", "पनीर", "cottage cheese",
+        "panir", "paniru",
+        "panner", "panier",
+        "fresh paneer", "paneer block",
+        "paneer packet"
+      ]
+    },
+    "butter": {
+      "canonical": "Butter",
+      "unit": "gm",
+      "aliases": [
+        "butter", "मक्खन", "makkhan",
+        "benne", "benney",
+        "vennai", "vennay",
+        "venna", "vennay",
+        "makhan", "loni",
+        "butter packet", "amul butter",
+        "venna packet", "benne packet"
+      ]
+    },
+    "bread": {
+      "canonical": "Bread",
+      "unit": "packet",
+      "aliases": [
+        "bread", "ब्रेड",
+        "bread packet", "pav", "paav",
+        "double roti", "roti bread",
+        "white bread", "brown bread",
+        "sandwich bread",
+        "bread loaf", "loaf"
+      ]
+    },
+    "biscuit": {
+      "canonical": "Biscuits",
+      "unit": "packet",
+      "aliases": [
+        "biscuit", "biscuits", "बिस्किट",
+        "biskitu", "biskot", "biskut",
+        "cookie", "cookies",
+        "parle g", "marie", "good day",
+        "bourbon", "hide and seek",
+        "cream biscuit"
+      ]
+    },
+    "chips": {
+      "canonical": "Chips",
+      "unit": "packet",
+      "aliases": [
+        "chips", "चिप्स",
+        "wafers", "crisps",
+        "lays", "kurkure",
+        "potato chips", "bingo",
+        "corn chips", "namkeen chips"
+      ]
+    },
+    "soft_drinks": {
+      "canonical": "Soft drinks",
+      "unit": "bottle",
+      "aliases": [
+        "soft drink", "soft drinks", "cold drink", "cold drinks",
+        "soda", "cola", "coke", "pepsi",
+        "thanda", "thandi bottle",
+        "fizzy drink", "aerated drink",
+        "sprite", "fanta", "limca",
+        "thumps up", "thumbs up",
+        "cold drink bottle"
+      ]
+    },
+    "coffee": {
+      "canonical": "Coffee",
+      "unit": "gm",
+      "aliases": [
+        "coffee", "कॉफ़ी",
+        "kaapi", "kaaphi", "kappi", "kofi",
+        "filter coffee", "instant coffee",
+        "coffee powder", "nescafe", "bru",
+        "kaaphi pudi", "coffee pudi",
+        "kaapi podi", "coffee davara"
+      ]
+    },
+    "shampoo": {
+      "canonical": "Shampoo",
+      "unit": "bottle",
+      "aliases": [
+        "shampoo", "शैंपू",
+        "shyaampoo", "sampoo",
+        "hair wash", "head wash",
+        "kondige", "talai arukku",
+        "pantene", "head shoulders",
+        "dove shampoo", "clinic plus",
+        "shampoo bottle"
+      ]
+    },
+    "toothpaste": {
+      "canonical": "Toothpaste",
+      "unit": "piece",
+      "aliases": [
+        "toothpaste", "टूथपेस्ट", "paste",
+        "halli paste", "halige paste",
+        "pal podi", "pal theyikum paste",
+        "colgate", "pepsodent",
+        "closeup", "sensodyne",
+        "tooth paste", "dental cream",
+        "halike", "hannin paste"
+      ]
+    },
+    "toothbrush": {
+      "canonical": "Toothbrush",
+      "unit": "piece",
+      "aliases": [
+        "toothbrush", "tooth brush",
+        "brush", "dant brush",
+        "halli brash", "oral b",
+        "colgate brush"
+      ]
+    },
+    "detergent": {
+      "canonical": "Detergent",
+      "unit": "kg",
+      "aliases": [
+        "detergent", "washing powder", "डिटर्जेंट",
+        "kapada pudi", "kapada hudi",
+        "thuni podi", "thuni thuyikum podi",
+        "kapda soap", "washing soap",
+        "surf excel", "ariel", "tide",
+        "rin", "wheel",
+        "kapda powder", "washing soda",
+        "detergent powder", "detergent bar"
+      ]
+    },
+    "onion": {
+      "canonical": "Onions",
+      "unit": "kg",
+      "aliases": [
+        "onion", "onions", "प्याज", "pyaz",
+        "eerulli", "errulli", "ulli",
+        "vengayam", "venkaayam",
+        "ullipayalu", "ullipaayu",
+        "pyaaj", "kanda",
+        "dungli", "dungri",
+        "peyaj", "piaz",
+        "pyaz kg", "onion kg"
+      ]
+    },
+    "potato": {
+      "canonical": "Potatoes",
+      "unit": "kg",
+      "aliases": [
+        "potato", "potatoes", "आलू", "aloo",
+        "aaloo", "batata",
+        "urulaikizhangu", "urulai",
+        "bangaladumpa", "bangala dumpa",
+        "bataata", "alu",
+        "aloo sabzi", "potato kg",
+        "aalugadde", "gaddey",
+        "alu", "aalu"
+      ]
+    },
+    "tomato": {
+      "canonical": "Tomato Ketchup",
+      "unit": "bottle",
+      "aliases": [
+        "tomato ketchup", "ketchup", "sauce",
+        "tomato sauce", "tamato sauce",
+        "kissan", "maggi sauce",
+        "chilli sauce", "tomato chilli sauce"
+      ]
+    },
+    "spices": {
+      "canonical": "Spices",
+      "unit": "gm",
+      "aliases": [
+        "spices", "masala", "मसाला",
+        "masale", "masaleu",
+        "masalagal", "masalalu",
+        "mirchi", "mirchi powder", "red chilli",
+        "haldi", "turmeric", "arishina",
+        "manjal", "pasupu",
+        "jeera", "cumin", "jeerige",
+        "seeragam", "jilakarra",
+        "garam masala", "kitchen king",
+        "rasam powder", "sambar powder",
+        "curry powder", "biryani masala"
+      ]
+    },
+    "soap_bar": {
+      "canonical": "Soap",
+      "unit": "piece",
+      "aliases": [
+        "lux", "lifebuoy", "dettol soap",
+        "dove soap", "pears",
+        "medimix", "mysore sandal",
+        "hamam", "cinthol"
+      ]
+    }
   }
 }

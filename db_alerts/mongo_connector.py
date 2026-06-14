@@ -10,9 +10,12 @@ FIXES APPLIED:
   [Fix 4] reminder_count field seeded in khata for escalating Vasooli tracking
   New fn : increment_reminder_count() — called by /log (auto) and /vasooli (manual)
   log_order() now returns (order_id, order_doc, highest_debt) — 3-tuple
+  [Multilingual] STORE_PRICES now covers all 25 products from ML/products.csv
+                 using canonical names that sku_catalog.json resolves to.
 """
 
 import os
+import re
 import uuid
 from datetime import datetime, timezone
 from pymongo import MongoClient, ReturnDocument
@@ -25,22 +28,73 @@ MONGO_URI = os.getenv("MONGO_URI")
 DB_NAME   = os.getenv("MONGO_DB_NAME", "kirana_ai")
 STORE_ID  = os.getenv("STORE_ID", "store_001")
 
-STORE_PRICES = {
-    "Wheat Flour":           50.0,
-    "Milk":                  32.0,
-    "Rice":                  60.0,
-    "Sugar":                 45.0,
-    "Cooking Oil":          120.0,
-    "Salt":                  20.0,
-    "Tea":                   80.0,
-    "Instant Noodles":       15.0,
-    "Soap":                  35.0,
-    "Lamb":                 600.0,
-    "Raw Mango":             40.0,
-    "Prawns":               450.0,
+# ---------------------------------------------------------------------------
+# STORE_PRICES — keyed on canonical product names from sku_catalog.json.
+# All 25 products from ML/products.csv are covered.
+# Prices are representative Indian retail prices (₹).
+# ---------------------------------------------------------------------------
+STORE_PRICES: dict[str, float] = {
+    # ── Staples ──────────────────────────────────────────────────────────────
+    "Rice":             60.0,   # per kg
+    "Wheat Flour":      50.0,   # per kg
+    "Cooking Oil":     120.0,   # per litre
+    "Mustard Oil":     150.0,   # per litre
+    "Sugar":            45.0,   # per kg
+    "Dal":              90.0,   # per kg
+    "Salt":             20.0,   # per kg
+    "Spices":           80.0,   # per 100gm pack (unit=gm, price per gm scaled below)
+
+    # ── Dairy ─────────────────────────────────────────────────────────────────
+    "Milk":             32.0,   # per litre
+    "Curd":             50.0,   # per kg
+    "Paneer":          320.0,   # per kg  (unit=gm → price handled per-gram)
+    "Butter":          560.0,   # per kg  (unit=gm → price handled per-gram)
+
+    # ── Snacks & Beverages ────────────────────────────────────────────────────
+    "Instant Noodles":  15.0,   # per packet
+    "Bread":            40.0,   # per packet (400gm loaf)
+    "Soft drinks":      40.0,   # per bottle (600ml)
+    "Chips":            20.0,   # per packet
+    "Biscuits":         30.0,   # per packet
+    "Tea":             280.0,   # per kg   (unit=gm → price handled per-gram)
+    "Coffee":          500.0,   # per kg   (unit=gm → price handled per-gram)
+    "Tomato Ketchup":   85.0,   # per bottle
+
+    # ── Personal Care ─────────────────────────────────────────────────────────
+    "Soap":             35.0,   # per piece
+    "Shampoo":         150.0,   # per bottle
+    "Toothpaste":       80.0,   # per piece
+    "Toothbrush":       50.0,   # per piece
+
+    # ── Household ─────────────────────────────────────────────────────────────
+    "Detergent":        90.0,   # per kg
+
+    # ── Fresh Produce ─────────────────────────────────────────────────────────
+    "Onions":           40.0,   # per kg
+    "Potatoes":         30.0,   # per kg
+
+    # ── Legacy / alternate canonical names (belt-and-suspenders) ─────────────
+    "Lamb":            600.0,
+    "Raw Mango":        40.0,
+    "Prawns":          450.0,
     "Kashmiri Chili Powder": 80.0,
-    "Mustard Oil":          150.0,
 }
+
+# ---------------------------------------------------------------------------
+# Units where pricing is per-gram but catalog unit is "gm"
+# We normalise to a per-unit price so the line total is sensible.
+# e.g. Tea: ₹280/kg → ₹0.28/gm
+# ---------------------------------------------------------------------------
+_PER_GRAM_PRODUCTS = {"Tea", "Coffee", "Paneer", "Butter", "Spices"}
+
+
+def _effective_unit_price(canonical_name: str, unit: str | None) -> float:
+    """Return the correct per-unit price accounting for gm vs kg billing."""
+    base = STORE_PRICES.get(canonical_name, 0.0)
+    if canonical_name in _PER_GRAM_PRODUCTS and (unit or "").lower() == "gm":
+        return round(base / 1000, 4)   # ₹/gm
+    return base
+
 
 WHOLESALE_THRESHOLD     = 1500.0
 WHOLESALE_DISCOUNT_RATE = 0.10
@@ -55,24 +109,18 @@ def _get_db():
     return client[DB_NAME]
 
 
-# Public alias so main.py can do: from mongo_connector import get_db
 def get_db():
     return _get_db()
 
 
 # ── Fix 5: Resolve "Unknown" / "Default" customer names ──────────────────────
 def _resolve_customer_name(order: dict) -> str:
-    """
-    If Person 2's AI failed to catch the customer's name, fall back to the
-    last 4 digits of their phone number rather than the useless string "Unknown".
-    """
     name  = (order.get("customer_name") or "").strip()
     phone = order.get("customer_phone", "")
 
     if name and name.lower() not in ("unknown", "default", "customer", ""):
         return name
 
-    # Fallback: last 4 digits of customer phone
     digits = "".join(c for c in phone if c.isdigit())
     if len(digits) >= 4:
         return f"Customer {digits[-4:]}"
@@ -87,8 +135,11 @@ def _enrich_items_with_prices(items: list) -> tuple[list, float]:
 
     for item in items:
         qty        = float(item.get("qty", 1))
-        unit_price = STORE_PRICES.get(item.get("name", ""), 0.0)
-        line_total = unit_price * qty
+        unit       = item.get("unit")
+        name       = item.get("name", "")
+        unit_price = _effective_unit_price(name, unit)
+        line_total = round(unit_price * qty, 2)
+
         item["unit_price"] = unit_price
         item["line_total"] = line_total
         enriched_items.append(item)
@@ -122,10 +173,10 @@ def _write_order(
 
     order_doc = {
         "order_id":         order_id,
-        "customer_name":    _resolve_customer_name(order),         # Fix 5
+        "customer_name":    _resolve_customer_name(order),
         "customer_phone":   order.get("customer_phone", ""),
         "store_id":         order.get("store_id", STORE_ID),
-        "language":         order.get("language", "hi"),           # Sarvam code: hi/kn/en/ta/te…
+        "language":         order.get("language", "hi"),
         "items":            enriched_items,
         "split_with":       order.get("split_with", []),
         "payment_mode":     order.get("payment_mode", "cash"),
@@ -134,13 +185,26 @@ def _write_order(
         "original_total":   original_total,
         "discount_applied": discount_applied,
         "total_amount":     final_total,
+        # split_shares maps each party -> their share of the final_total (useful for downstream UIs and audits)
+        "split_shares": {},
         "shopkeeper_phone": shopkeeper_phone,
         "created_at":       now,
         "status":           "pending",
     }
 
     orders_col.insert_one(order_doc)
-    order_doc.pop("_id", None)  # Remove ObjectId so dict stays JSON-serializable
+    # Populate split_shares for visibility: include primary + any split_with
+    try:
+        parties = list(dict.fromkeys([order_doc.get("customer_name")] + (order_doc.get("split_with") or [])))
+        if parties:
+            per_person = round(order_doc.get("total_amount", 0.0) / len(parties), 2)
+            for p in parties:
+                order_doc["split_shares"][p] = per_person
+            # write this back to the DB document so it's persisted
+            orders_col.update_one({"order_id": order_id}, {"$set": {"split_shares": order_doc["split_shares"]}})
+    except Exception:
+        pass
+    order_doc.pop("_id", None)
 
     print(
         f"[MongoDB] ✅ Order {order_id} | "
@@ -149,18 +213,8 @@ def _write_order(
     return order_id, order_doc
 
 
-# ── Khata Split (Critical Fix + Fix 3) ───────────────────────────────────────
+# ── Khata Split ───────────────────────────────────────────────────────────────
 def _update_khata(khata_col: Collection, order_doc: dict) -> float:
-    """
-    CRITICAL FIX: The primary customer is NOW included in the debt distribution,
-    not just the people in split_with. Everyone who owes money gets a separate
-    ledger entry.
-
-    Fix 3: Only runs when payment_mode == "khata". Cash/UPI orders skip entirely.
-
-    Returns the highest total_outstanding seen across all updated khata entries,
-    so main.py can decide whether to auto-trigger a Vasooli voice note.
-    """
     total_amount = order_doc.get("total_amount", 0.0)
     payment_mode = order_doc.get("payment_mode", "").lower()
     split_with   = order_doc.get("split_with", [])
@@ -168,13 +222,11 @@ def _update_khata(khata_col: Collection, order_doc: dict) -> float:
     order_id     = order_doc["order_id"]
     primary_cust = order_doc["customer_name"]
 
-    # Fix 3: Skip entirely for non-credit orders
     if total_amount <= 0 or payment_mode != "khata":
         print("[MongoDB] ℹ️  Not a khata order — skipping khata update.")
         return 0.0
 
-    # Critical Fix: primary customer is always in the debt distribution
-    parties = list(dict.fromkeys([primary_cust] + split_with))  # preserve order, no dups
+    parties     = list(dict.fromkeys([primary_cust] + split_with))
     num_parties = len(parties)
     per_person  = round(total_amount / num_parties, 2)
     now         = datetime.now(timezone.utc)
@@ -199,7 +251,7 @@ def _update_khata(khata_col: Collection, order_doc: dict) -> float:
                     "customer_name":  person,
                     "customer_phone": order_doc.get("customer_phone", ""),
                     "store_id":       store_id,
-                    "reminder_count": 0,   # Fix 4: seed for escalating Vasooli
+                    "reminder_count": 0,
                 },
             },
             upsert=True,
@@ -224,33 +276,40 @@ def _update_customer_lifetime_value(
     if total_amount <= 0:
         return
 
-    result = customers_col.find_one_and_update(
-        {"customer_name": name, "store_id": store_id},
-        {
-            "$inc": {"lifetime_spend": total_amount, "order_count": 1},
-            "$set": {"last_order_at": datetime.now(timezone.utc)},
-            "$setOnInsert": {
-                "customer_name":  name,
-                "store_id":       store_id,
-                "customer_phone": order_doc.get("customer_phone", ""),
-            },
-        },
-        upsert=True,
-        return_document=ReturnDocument.AFTER,
-    )
-    print(
-        f"[MongoDB] 🏆 Loyalty: {name} | "
-        f"lifetime=₹{result['lifetime_spend']} | orders={result['order_count']}"
-    )
+    # If the order had split parties, distribute lifetime spend and order_count
+    # proportionally among all parties so loyalty isn't fully credited to the
+    # primary customer when the basket was shared.
+    split_with = order_doc.get("split_with", []) or []
+    parties = list(dict.fromkeys([name] + split_with))
+    per_person = round(total_amount / len(parties), 2) if parties else total_amount
+
+    for person in parties:
+        try:
+            # Case-insensitive match for existing customer name to avoid duplicates
+            filter_q = {"customer_name": {"$regex": f'^{re.escape(person)}$', "$options": "i"}, "store_id": store_id}
+            set_on_insert = {
+                "customer_name": person,
+                "store_id": store_id,
+                # Only set phone for primary (best-effort)
+                "customer_phone": order_doc.get("customer_phone", "") if person == name else "",
+            }
+            result = customers_col.find_one_and_update(
+                filter_q,
+                {
+                    "$inc": {"lifetime_spend": per_person, "order_count": 1},
+                    "$set": {"last_order_at": datetime.now(timezone.utc)},
+                    "$setOnInsert": set_on_insert,
+                },
+                upsert=True,
+                return_document=ReturnDocument.AFTER,
+            )
+            print(f"[MongoDB] 🏆 Loyalty: {result.get('customer_name', person)} | lifetime=₹{result.get('lifetime_spend', 0)} | orders={result.get('order_count', 0)}")
+        except Exception as e:
+            print(f"[MongoDB] ⚠️ Failed to update loyalty for {person}: {e}")
 
 
 # ── Public Entry Points ────────────────────────────────────────────────────────
 def log_order(order: dict, shopkeeper_phone: str) -> tuple[str, dict, float]:
-    """
-    Main entry point called by main.py.
-    Returns (order_id, order_doc, highest_debt).
-    highest_debt = max total_outstanding across all khata entries touched by this order.
-    """
     db            = _get_db()
     orders_col    = db["orders"]
     khata_col     = db["khata"]
@@ -272,11 +331,6 @@ def get_khata_balance(customer_name: str, store_id: str = STORE_ID) -> dict | No
 
 
 def increment_reminder_count(customer_name: str, store_id: str = STORE_ID) -> int:
-    """
-    Fix 4: Increments reminder_count in the khata document.
-    Returns new count, capped at 3 (max escalation level — no need to go beyond stern).
-    Called both automatically from /log and manually from /vasooli.
-    """
     db     = _get_db()
     result = db["khata"].find_one_and_update(
         {"customer_name": customer_name, "store_id": store_id},
@@ -287,5 +341,5 @@ def increment_reminder_count(customer_name: str, store_id: str = STORE_ID) -> in
         return_document=ReturnDocument.AFTER,
     )
     if not result:
-        return 1  # No doc found — treat as first reminder, don't crash
-    return min(result.get("reminder_count", 1), 3)  # Hard cap at 3
+        return 1
+    return min(result.get("reminder_count", 1), 3)

@@ -30,12 +30,16 @@ export default function Forecasts() {
     setProcureSuccessId(null);
     try {
       // Create draft Purchase Order
+      // Prefer canonicalProductId if provided by the ML payload. Otherwise use forecast.productId.
+      const prodId = (forecast as any).canonicalProductId || forecast.productId;
+      const usedProductId = prodId || forecast.productId;
+
       await suppliersService.createPurchaseOrder({
         supplierId: "sup-1", // Hind Unilever default
         supplierName: "Hindustan Unilever",
         items: [
           {
-            productId: forecast.productId,
+            productId: usedProductId,
             productName: forecast.product_name,
             quantity: forecast.recommended_reorder_quantity,
             costPrice: 210.00
@@ -60,24 +64,24 @@ export default function Forecasts() {
       {/* Header */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
-          <h2 className="text-xl font-bold text-white tracking-tight">AI Predictive Stock Forecasts</h2>
-          <p className="text-xs text-[#888888] mt-1">Autonomous machine learning models calculating stockout velocities, daily consumption limits, and replenishment orders.</p>
+  <h2 className="text-xl font-bold text-white tracking-tight">Stock Suggestions</h2>
+          <p className="text-xs text-[#888888] mt-1">Automatic suggestions: what to reorder and how fast items sell.</p>
         </div>
 
         <div className="flex items-center gap-2">
-          <span className="text-[10px] bg-[#10B981]/15 text-[#4edea3] font-bold border border-[#10B981]/30 py-1 px-2.5 rounded-sm flex items-center gap-1 leading-none uppercase">
-            <Sparkles size={11} /> Model: XGBoost-v2 Active
-          </span>
+            <span className="text-[10px] bg-[#10B981]/15 text-[#4edea3] font-bold border border-[#10B981]/30 py-1 px-2.5 rounded-sm flex items-center gap-1 leading-none uppercase">
+              <Sparkles size={11} /> Model active
+            </span>
         </div>
       </div>
 
       {/* Main Grid Forecast items */}
       <div className="space-y-4">
-        {loading ? (
-          <p className="text-xs text-[#888888] p-10 text-center font-mono animate-pulse">Running ML prediction pipelines...</p>
-        ) : forecasts.length === 0 ? (
-          <p className="text-xs text-[#888888] p-10 text-center font-mono">No product forecast profiles registered.</p>
-        ) : (
+          {loading ? (
+           <p className="text-xs text-[#888888] p-10 text-center font-mono animate-pulse">Calculating stock suggestions...</p>
+         ) : forecasts.length === 0 ? (
+           <p className="text-xs text-[#888888] p-10 text-center font-mono">No stock suggestions.</p>
+         ) : (
           forecasts.map((f, idx) => {
             const isStockoutImminent = f.predicted_stockout_days <= 1;
             const hasProcured = procuredIdList.includes(f.productId);

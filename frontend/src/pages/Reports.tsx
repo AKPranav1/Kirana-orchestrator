@@ -46,8 +46,8 @@ export default function Reports() {
       {/* Header */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
-          <h2 className="text-xl font-bold text-white tracking-tight">Audit Reports Center</h2>
-          <p className="text-xs text-[#888888] mt-1">Generate official CSV worksheets, GST tax listings, and inventory valuation summaries.</p>
+          <h2 className="text-xl font-bold text-white tracking-tight">Reports</h2>
+          <p className="text-xs text-[#888888] mt-1">Create CSVs for accounting, GST and stock value.</p>
         </div>
       </div>
 
@@ -58,17 +58,17 @@ export default function Reports() {
             <div className="p-2 bg-[#10B981]/10 rounded-sm w-fit text-[#4edea3] mb-3">
               <Calculator size={16} />
             </div>
-            <h3 className="text-xs font-bold uppercase tracking-wider text-white">Stock Assets & Valuations</h3>
+            <h3 className="text-xs font-bold uppercase tracking-wider text-white">Stock value report</h3>
             <p className="text-xs text-[#888888] mt-2 leading-relaxed">
-              Calculates wholesale asset holdings cost values vs total shelved retail checkouts based on active products catalog.
+              Calculates wholesaler cost value and retail value for your stock.
             </p>
           </div>
-          <button 
-            onClick={() => setActiveReport('valuation')}
-            className="w-full mt-4 py-2 bg-[#1C1B1B] hover:bg-white hover:text-black border border-[#1F1F1F] text-white font-semibold text-xs rounded-sm transition-all flex items-center justify-center gap-1.5 cursor-pointer"
-          >
-            <Play size={10} /> Generate Assets Valuation Report
-          </button>
+            <button 
+              onClick={() => setActiveReport('valuation')}
+              className="w-full mt-4 py-2 bg-[#1C1B1B] hover:bg-white hover:text-black border border-[#1F1F1F] text-white font-semibold text-xs rounded-sm transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+            >
+              <Play size={10} /> Generate stock report
+            </button>
         </div>
 
         {/* Card 2: GST Summary Reports */}
@@ -77,17 +77,17 @@ export default function Reports() {
             <div className="p-2 bg-blue-500/10 rounded-sm w-fit text-blue-400 mb-3">
               <FileText size={16} />
             </div>
-            <h3 className="text-xs font-bold uppercase tracking-wider text-white">GST Summary Worksheets</h3>
+            <h3 className="text-xs font-bold uppercase tracking-wider text-white">GST report</h3>
             <p className="text-xs text-[#888888] mt-2 leading-relaxed">
-              Consolidates customer order receipts from the day, mapping to 5%, 12%, and 18% standard Indian GST slabs.
+              Consolidates sales and shows GST amounts per slab.
             </p>
           </div>
-          <button 
-            onClick={() => setActiveReport('gst')}
-            className="w-full mt-4 py-2 bg-[#1C1B1B] hover:bg-white hover:text-black border border-[#1F1F1F] text-white font-semibold text-xs rounded-sm transition-all flex items-center justify-center gap-1.5 cursor-pointer"
-          >
-            <Play size={10} /> Compile Monthly GST Slabs
-          </button>
+            <button 
+              onClick={() => setActiveReport('gst')}
+              className="w-full mt-4 py-2 bg-[#1C1B1B] hover:bg-white hover:text-black border border-[#1F1F1F] text-white font-semibold text-xs rounded-sm transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+            >
+              <Play size={10} /> Generate GST report
+            </button>
         </div>
 
         {/* Card 3: Khata Aging Overdue Reminders */}
@@ -96,17 +96,17 @@ export default function Reports() {
             <div className="p-2 bg-red-500/10 rounded-sm w-fit text-red-400 mb-3">
               <Wallet size={16} />
             </div>
-            <h3 className="text-xs font-bold uppercase tracking-wider text-white">Khata Outstanding Audit</h3>
+            <h3 className="text-xs font-bold uppercase tracking-wider text-white">Credit book report</h3>
             <p className="text-xs text-[#888888] mt-2 leading-relaxed">
-              Generates historical credit aging profiles for overdue accounts, calculating recovery rates and lists of delinquent lines.
+              Shows overdue customers and total unpaid amounts.
             </p>
           </div>
-          <button 
-            onClick={() => setActiveReport('khata')}
-            className="w-full mt-4 py-2 bg-[#1C1B1B] hover:bg-white hover:text-black border border-[#1F1F1F] text-white font-semibold text-xs rounded-sm transition-all flex items-center justify-center gap-1.5 cursor-pointer"
-          >
-            <Play size={10} /> View Khata aging audit
-          </button>
+            <button 
+              onClick={() => setActiveReport('khata')}
+              className="w-full mt-4 py-2 bg-[#1C1B1B] hover:bg-white hover:text-black border border-[#1F1F1F] text-white font-semibold text-xs rounded-sm transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+            >
+              <Play size={10} /> View credit report
+            </button>
         </div>
       </div>
 
@@ -122,9 +122,9 @@ export default function Reports() {
 
           {activeReport === 'valuation' && (
             <div className="space-y-4">
-              <h3 className="text-sm font-semibold text-[#4edea3] uppercase tracking-wider flex items-center gap-2">
-                <CheckCircle size={14} /> Stock assets valuation report generated
-              </h3>
+                <h3 className="text-sm font-semibold text-[#4edea3] uppercase tracking-wider flex items-center gap-2">
+                  <CheckCircle size={14} /> Stock value report ready
+                </h3>
               <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 text-xs pt-2">
                 <div className="bg-[#0A0A0A] border border-[#1F1F1F] p-3 rounded-sm">
                   <span className="text-[#888888] text-[9px] uppercase font-bold">Total Unique SKUs</span>
@@ -135,11 +135,11 @@ export default function Reports() {
                   <p className="text-sm font-bold text-white mt-1">{products.reduce((sum, p) => sum + p.stockQuantity, 0)} Units</p>
                 </div>
                 <div className="bg-[#0A0A0A] border border-[#1F1F1F] p-3 rounded-sm">
-                  <span className="text-[#888888] text-[9px] uppercase font-bold">B2B Wholesaler Cost Asset value</span>
+                  <span className="text-[#888888] text-[9px] uppercase font-bold">Wholesaler cost value</span>
                   <p className="text-sm font-bold text-[#4edea3] font-mono mt-1">₹ {calculateInventoryValuation().toLocaleString('en-IN')}</p>
                 </div>
                 <div className="bg-[#0A0A0A] border border-[#1F1F1F] p-3 rounded-sm">
-                  <span className="text-[#888888] text-[10px] uppercase font-bold">Est. Retailing checkout value</span>
+                  <span className="text-[#888888] text-[10px] uppercase font-bold">Retail value</span>
                   <p className="text-sm font-bold text-white font-mono mt-1">₹ {calculateRetailValuation().toLocaleString('en-IN')}</p>
                 </div>
               </div>

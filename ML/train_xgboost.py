@@ -239,16 +239,31 @@ if __name__ == "__main__":
         test_df_copy = test_df.copy().reset_index(drop=True)
         test_df_copy["predicted_qty"] = preds
 
+        # Try to map product names to canonical product IDs used by the frontend inventory.
+        # We load a small JSON mapping file if available (created by the repo maintainers).
+        product_to_id = {}
+        try:
+            import json
+            map_path = os.path.join(os.path.dirname(__file__), 'product_to_canonical.json')
+            if os.path.exists(map_path):
+                with open(map_path, 'r', encoding='utf-8') as fh:
+                    product_to_id = json.load(fh)
+        except Exception:
+            product_to_id = {}
+
         for product, g in test_df_copy.groupby("product_name"):
             pred_mean = float(g["predicted_qty"].mean())
             # heuristics for current_stock and recommended reorder
             current_stock = 10
             predicted_stockout_days = int(current_stock / max(1.0, pred_mean)) if pred_mean > 0 else 0
             recommended_reorder_quantity = max(0, int(pred_mean * 7 - current_stock))
+            # Include a canonical product name and keep the kebab-case productId for backward compatibility.
+            # Also include optional canonicalProductId if a mapping is available later.
             forecasts.append(
                 {
                     "productId": product.replace(" ", "-").lower(),
                     "product_name": product,
+                    "canonicalProductId": product_to_id.get(product) if product_to_id else None,
                     "current_stock": current_stock,
                     "predicted_daily_demand": round(pred_mean, 2),
                     "predicted_stockout_days": predicted_stockout_days,

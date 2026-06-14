@@ -151,7 +151,7 @@ export default function AnalyticsView() {
                         paddingAngle={3}
                         dataKey="value"
                       >
-                        {data.categoryDistribution.map((entry, index) => (
+                        {(data.categoryDistribution||[]).map((entry, index) => (
                           <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
                         ))}
                       </Pie>
@@ -165,7 +165,7 @@ export default function AnalyticsView() {
 
                 {/* Legend list */}
                 <div className="space-y-2 text-xs">
-                  {data.categoryDistribution.map((entry, idx) => (
+                  {(data.categoryDistribution||[]).map((entry, idx) => (
                     <div key={idx} className="flex items-center gap-2">
                       <div className="w-2.5 h-2.5 rounded-sm" style={{ backgroundColor: COLORS[idx % COLORS.length] }}></div>
                       <span className="text-[#888888]">{entry.name}</span>
