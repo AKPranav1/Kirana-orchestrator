@@ -14,9 +14,12 @@ import Customers from './pages/Customers';
 import KhataLedger from './pages/KhataLedger';
 import Inventory from './pages/Inventory';
 import Analytics from './pages/Analytics';
-import Forecasts from './pages/Forecasts';
+// import Forecasts from './pages/Forecasts'; // Replaced by MLDashboard
 import Reports from './pages/Reports';
 import Settings from './pages/Settings';
+
+// The new ML Dashboard component
+import MLDashboard from './components/MLDashboard';
 
 // Reusable action dialogs
 import NewOrderModal from './components/NewOrderModal';
@@ -56,7 +59,8 @@ export default function App() {
       case 'analytics':
         return <Analytics />;
       case 'forecasts':
-        return <Forecasts />;
+        // Here is where we inject your new Machine Learning Chart Dashboard!
+        return <MLDashboard />;
       case 'reports':
         return <Reports />;
       case 'settings':
