@@ -1,13 +1,18 @@
 import os
 import httpx
+import tempfile
+import asyncio
 from typing import Tuple
 from dotenv import load_dotenv
+from sarvamai import SarvamAI
 
 load_dotenv()
 
-SARVAM_API_KEY    = os.getenv("SARVAM_API_KEY")
-SARVAM_STT_URL    = os.getenv("SARVAM_STT_URL",    "https://api.sarvam.ai/speech-to-text")
-SARVAM_VISION_URL = os.getenv("SARVAM_VISION_URL", "https://api.sarvam.ai/vision/ocr")
+SARVAM_API_KEY = os.getenv("SARVAM_API_KEY")
+SARVAM_STT_URL = os.getenv("SARVAM_STT_URL", "https://api.sarvam.ai/speech-to-text")
+# Optional tuning knobs
+SARVAM_VISION_PREFER_HANDWRITING = os.getenv("SARVAM_VISION_PREFER_HANDWRITING", "1")
+SARVAM_VISION_LANGUAGE = os.getenv("SARVAM_VISION_LANGUAGE")
 
 # ---------------------------------------------------------------------------
 # Sarvam language code → BCP-47 locale used by the STT API
@@ -76,42 +81,99 @@ async def speech_to_text(
         resp = r.json()
         return resp.get("transcript", ""), resp
 
+def _run_sarvam_vision_sync(image_path: str, api_key: str, handwritten: bool = False, language: str | None = None) -> dict:
+    """Synchronous helper to run the official Sarvam SDK.
 
-async def vision_ocr(
-    image_bytes: bytes,
-    language_code: str = "unknown",
-) -> Tuple[str, dict]:
+    Returns a dict with keys: text (string), raw (string repr), confidence (float|None)
     """
-    Extract text from an image via Sarvam's vision/document OCR.
+    client = SarvamAI(api_subscription_key=api_key)
 
-    Args:
-        image_bytes:   Raw image content (JPEG / PNG).
-        language_code: 2-letter Sarvam language code — hints the OCR engine
-                       toward the expected script for better accuracy on
-                       low-resolution or handwritten images.
+    kwargs = {"output_format": "md"}
+    if language:
+        kwargs["language"] = language
 
-    Returns:
-        (extracted_text_string, raw_api_response_dict)
+    # Try to request a handwriting/document-specific path if requested.
+    response = None
+    try:
+        if handwritten:
+            # SDKs vary; attempt a handwritten/document_type kwarg and fall back gracefully
+            try:
+                response = client.document_digitization.digitize(file_path=image_path, document_type="handwritten", **kwargs)
+            except TypeError:
+                # SDK doesn't accept document_type; call generic digitize
+                response = client.document_digitization.digitize(file_path=image_path, **kwargs)
+        else:
+            response = client.document_digitization.digitize(file_path=image_path, **kwargs)
+    except Exception:
+        # Re-raise to allow caller to handle/log
+        raise
 
-    NOTE: As of current Sarvam docs, image/document OCR ("Sarvam Vision" /
-    Document Intelligence) is an async job-based API (create job -> upload
-    file -> trigger processing -> poll status -> download result ZIP),
-    not a single synchronous POST with a file like this. The endpoint
-    `https://api.sarvam.ai/vision/ocr` used below is likely stale and may
-    return 404/400 in production. This mock path keeps text/audio orders
-    unblocked; if you hit errors here on a real image order, capture the
-    response body and we can wire up the correct async flow.
-    """
+    # Parse the text blocks from the SDK response
+    extracted_text = ""
+    confs = []
+    for page in getattr(response, "pages", []):
+        for block in getattr(page, "blocks", []):
+            # Some SDKs return text and optional confidence on blocks
+            extracted_text += getattr(block, "text", "") + "\n"
+            if hasattr(block, "confidence"):
+                try:
+                    confs.append(float(getattr(block, "confidence")))
+                except Exception:
+                    pass
+
+    avg_conf = sum(confs) / len(confs) if confs else None
+    # Keep a safe, small string representation of the raw response for debugging
+    raw_summary = str(response)[:4000]
+    return {"text": extracted_text, "raw": raw_summary, "confidence": avg_conf}
+
+async def vision_ocr(image_bytes: bytes) -> Tuple[str, dict]:
+    """Async wrapper for the Sarvam Vision SDK."""
+    SARVAM_API_KEY = os.getenv("SARVAM_API_KEY")
     if not SARVAM_API_KEY:
+        print("[WARNING] Missing Sarvam API Key. Returning mock data.")
         return "2 kilo aata, ek doodh", {"mock": True}
 
-    headers = {"api-subscription-key": SARVAM_API_KEY}
-    data    = {"language_code": _locale(language_code)}
+    # The SDK strictly requires a file path, so we save the Twilio bytes temporarily
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as temp_img:
+        temp_img.write(image_bytes)
+        temp_img_path = temp_img.name
 
-    async with httpx.AsyncClient(timeout=30) as client:
-        files = {"file": ("image.jpg", image_bytes, "image/jpeg")}
-        r = await client.post(SARVAM_VISION_URL, headers=headers, files=files, data=data)
-        if r.status_code >= 400:
-            raise RuntimeError(f"Sarvam Vision OCR {r.status_code}: {r.text[:300]}")
-        resp = r.json()
-        return resp.get("text", ""), resp
+    try:
+        print("[SARVAM OCR] Processing image via SDK...")
+
+        prefer_hand = SARVAM_VISION_PREFER_HANDWRITING == "1"
+        lang = SARVAM_VISION_LANGUAGE if SARVAM_VISION_LANGUAGE else None
+
+        # Try handwriting-first (if configured), falling back to generic digitize
+        result = None
+        used_model = "document"
+        if prefer_hand:
+            try:
+                result = await asyncio.to_thread(_run_sarvam_vision_sync, temp_img_path, SARVAM_API_KEY, True, lang)
+                used_model = "handwritten"
+            except Exception as e:
+                # If handwriting-specific call fails at SDK level, attempt generic digitize
+                print(f"[SARVAM HANDWRITING TRY FAILED] {e}; falling back to generic digitize")
+
+        if result is None or not result.get("text", "").strip():
+            # Either we didn't try handwriting or it produced empty text — call generic
+            try:
+                result = await asyncio.to_thread(_run_sarvam_vision_sync, temp_img_path, SARVAM_API_KEY, False, lang)
+                used_model = "document"
+            except Exception as e:
+                print(f"[SARVAM EXCEPTION] {e}")
+                return "", {"error": str(e)}
+
+        extracted_text = result.get("text", "")
+        meta = {"status": "success", "model": used_model, "confidence": result.get("confidence"), "raw": result.get("raw")}
+        print(f"[SARVAM SUCCESS] Extracted: {extracted_text[:50]}... (model={used_model})")
+        return extracted_text, meta
+
+    except Exception as e:
+        print(f"[SARVAM EXCEPTION] {e}")
+        return "", {"error": str(e)}
+
+    finally:
+        # Prevent server storage from filling up with hackathon test images
+        if os.path.exists(temp_img_path):
+            os.remove(temp_img_path)

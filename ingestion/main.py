@@ -100,10 +100,13 @@ async def process(req: ProcessRequest):
         raw_input_url = payload
         try:
             auth = (TWILIO_SID, TWILIO_TOKEN) if TWILIO_SID and TWILIO_TOKEN else None
-            data = await _fetch_bytes_with_retry(payload, auth=auth, timeout=30)
-            # Pass language_hint so Sarvam uses the correct locale model
-            text, _ = await speech_to_text(data, language_code=language_hint)
-            clean_text, _ = normalize_text(text)
+            async with httpx.AsyncClient(timeout=30) as client:
+                r = await client.get(payload, auth=auth)
+                r.raise_for_status()
+                text, _ = await speech_to_text(r.content)
+                clean_text, _ = normalize_text(text)
+                # attach basic input metadata for audio
+                input_meta = {"input_type": payload_type, "raw_input_url": raw_input_url, "customer_phone": req.customer_phone}
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"Audio fetch failed: {e}")
 
@@ -111,10 +114,13 @@ async def process(req: ProcessRequest):
         raw_input_url = payload
         try:
             auth = (TWILIO_SID, TWILIO_TOKEN) if TWILIO_SID and TWILIO_TOKEN else None
-            data = await _fetch_bytes_with_retry(payload, auth=auth, timeout=30)
-            # Pass language_hint so Sarvam uses the correct locale OCR model
-            text, _ = await vision_ocr(data, language_code=language_hint)
-            clean_text, _ = normalize_text(text)
+            async with httpx.AsyncClient(timeout=30) as client:
+                r = await client.get(payload, auth=auth)
+                r.raise_for_status()
+                text, meta = await vision_ocr(r.content)
+                clean_text, _ = normalize_text(text)
+                # attach sarvam metadata for downstream debugging
+                input_meta = {"input_type": payload_type, "raw_input_url": raw_input_url, "customer_phone": req.customer_phone, "sarvam_meta": meta}
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"Image fetch failed: {e}")
 
@@ -122,7 +128,11 @@ async def process(req: ProcessRequest):
         # Text: normalize handles all Indic scripts natively
         clean_text, _ = normalize_text(payload)
 
-    # ── 2. LLM EXTRACTION + SKU MATCHING ─────────────────────────────────
+    # Ensure input_meta exists for downstream processing
+    if "input_meta" not in locals():
+        input_meta = {"input_type": payload_type, "raw_input_url": raw_input_url, "customer_phone": req.customer_phone}
+
+    # ── 2. LLM EXTRACTION + SKU MATCHING ──────────────────────────
     try:
         parsed = await parse_order_text(clean_text)
         print(f"[INGESTION] parsed_payload={parsed.model_dump()}", flush=True)
