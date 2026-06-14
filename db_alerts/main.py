@@ -124,6 +124,7 @@ def ping_mongo():
 
 
 # ── Core: Receive Order ────────────────────────────────────────────────────────
+# ── Core: Receive Order ────────────────────────────────────────────────────────
 @app.post("/log", tags=["core"])
 async def log_endpoint(req: LogRequest):
     """
@@ -134,29 +135,29 @@ async def log_endpoint(req: LogRequest):
         print("[/log] ⚠️ Received non-dict payload; coercing to empty dict for safety")
         raw_payload = {}
 
-    # Try lightweight validation against FlatOrder model if ingestion sent a compatible payload
     clean_order = None
+
+    # ── THE ADAPTER: Convert Person 2's messy nested JSON into Person 3's clean format ──
+
+    # 1. Try strict validation first — flat order sent directly by ingestion
     try:
-        candidate = FlatOrder.model_validate(req.order)
+        candidate = FlatOrder.model_validate(raw_payload)
         clean_order = candidate.model_dump()
-        # Ensure shopkeeper fallback
         clean_order.setdefault("customer_phone", req.shopkeeper_phone)
     except Exception:
-        # fallback to existing adapter behavior
-        # ── THE ADAPTER: Convert Person 2's messy nested JSON into Person 3's clean format ──
-        # Fast-path: if ingestion already sent a flat order (has customer_name and items), accept it as-is.
-        if (
-            isinstance(raw_payload, dict)
-            and "customer_name" in raw_payload
-            and "items" in raw_payload
-        ):
-            clean_order = raw_payload
-            # ensure minimal fields exist
-            clean_order.setdefault("customer_phone", req.shopkeeper_phone)
-            clean_order.setdefault("language", "hi")
-            clean_order.setdefault("payment_mode", "cash")
-            clean_order.setdefault("split_with", [])
-    else:
+        clean_order = None
+
+    # 2. Fast-path: already-flat dict (has customer_name + items) but didn't
+    #    pass strict FlatOrder validation (e.g. missing store_id)
+    if clean_order is None and "customer_name" in raw_payload and "items" in raw_payload:
+        clean_order = raw_payload
+        clean_order.setdefault("customer_phone", req.shopkeeper_phone)
+        clean_order.setdefault("language", "hi")
+        clean_order.setdefault("payment_mode", "cash")
+        clean_order.setdefault("split_with", [])
+
+    # 3. Legacy nested 'processed_splits' format
+    if clean_order is None and raw_payload.get("processed_splits"):
         clean_order = {
             "customer_name": "Unknown",
             "customer_phone": raw_payload.get("customer_phone", req.shopkeeper_phone),
@@ -166,33 +167,33 @@ async def log_endpoint(req: LogRequest):
             "split_with": [],
         }
 
-        # Handle Person 2's deeply nested 'processed_splits' array
-        if (
-            "processed_splits" in raw_payload
-            and len(raw_payload["processed_splits"]) > 0
-        ):
-            main_split = raw_payload["processed_splits"][0]
-            clean_order["customer_name"] = main_split.get("buyer_name", "Unknown")
+        main_split = raw_payload["processed_splits"][0]
+        clean_order["customer_name"] = main_split.get("buyer_name", "Unknown")
 
-            for item in main_split.get("items", []):
-                clean_order["items"].append(
-                    {
-                        "name": item.get("item_name", "item"),
-                        "qty": item.get("quantity", 1),
-                    }
-                )
+        for item in main_split.get("items", []):
+            clean_order["items"].append(
+                {
+                    "name": item.get("item_name", "item"),
+                    "qty": item.get("quantity", 1),
+                }
+            )
 
-            # Extra buyers go into split_with
-            if len(raw_payload["processed_splits"]) > 1:
-                for extra_split in raw_payload["processed_splits"][1:]:
-                    clean_order["split_with"].append(
-                        extra_split.get("buyer_name", "Unknown")
-                    )
-        else:
-            # Fallback just in case Person 2 actually sends the correct flat JSON format
-            clean_order["customer_name"] = raw_payload.get("customer_name", "Unknown")
-            clean_order["items"] = raw_payload.get("items", [])
-            clean_order["split_with"] = raw_payload.get("split_with", [])
+        # Extra buyers go into split_with
+        for extra_split in raw_payload["processed_splits"][1:]:
+            clean_order["split_with"].append(
+                extra_split.get("buyer_name", "Unknown")
+            )
+
+    # 4. Last resort: nothing usable came through (e.g. ingestion error → {})
+    if clean_order is None:
+        clean_order = {
+            "customer_name": raw_payload.get("customer_name", "Unknown"),
+            "customer_phone": raw_payload.get("customer_phone", req.shopkeeper_phone),
+            "language": raw_payload.get("language", "hi"),
+            "payment_mode": raw_payload.get("payment_mode", "cash"),
+            "items": raw_payload.get("items", []),
+            "split_with": raw_payload.get("split_with", []),
+        }
 
     print(f"\n[/log] 📥 Adapted Order for DB: {clean_order}")
     print(
@@ -261,7 +262,6 @@ async def log_endpoint(req: LogRequest):
     except Exception as e:
         print(f"[/log] ❌ CRITICAL DB ERROR: {e}\n")
         raise HTTPException(status_code=500, detail=str(e))
-
 
 # ── Core: Manual Vasooli ───────────────────────────────────────────────────────
 @app.post("/vasooli", tags=["core"])
@@ -733,3 +733,19 @@ def get_analytics():
 
     analytics = {"khata_ageing": ageing_buckets}
     return {"analytics": analytics}
+
+@app.get("/customers/lookup")
+def lookup_customer(phone: str):
+    db = get_db()
+    # _update_customer_lifetime_value() writes "customer_phone" / "customer_name",
+    # so query those field names. Also tolerate "phone" / "name" in case a
+    # customer was manually created via POST /customers with those keys.
+    doc = db["customers"].find_one(
+        {"$or": [{"customer_phone": phone}, {"phone": phone}]},
+        {"_id": 0, "customer_name": 1, "name": 1},
+    )
+    if doc:
+        name = doc.get("customer_name") or doc.get("name")
+        if name:
+            return {"name": name}
+    raise HTTPException(status_code=404, detail="Customer not found")

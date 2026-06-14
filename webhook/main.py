@@ -69,7 +69,7 @@ async def webhook(request: Request):
                 json={"order": order, "shopkeeper_phone": SHOPKEEPER_PHONE},
             )
             print(f"[DB+ALERT] order forwarded to Person 3")
-    except Exception as e:
+    except Exception as e:  
         print(f"[DB+ALERT ERROR] {e}")
 
     twiml = """<?xml version="1.0"?><Response><Message>Order received! We'll get that ready for you.</Message></Response>"""
