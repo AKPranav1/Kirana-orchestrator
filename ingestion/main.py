@@ -61,6 +61,8 @@ async def process(req: ProcessRequest):
                 r.raise_for_status()
                 text, _ = await speech_to_text(r.content)
                 clean_text, _ = normalize_text(text)
+                # attach basic input metadata for audio
+                input_meta = {"input_type": payload_type, "raw_input_url": raw_input_url, "customer_phone": req.customer_phone}
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"Audio fetch failed: {e}")
 
@@ -71,13 +73,19 @@ async def process(req: ProcessRequest):
             async with httpx.AsyncClient(timeout=30) as client:
                 r = await client.get(payload, auth=auth)
                 r.raise_for_status()
-                text, _ = await vision_ocr(r.content)
+                text, meta = await vision_ocr(r.content)
                 clean_text, _ = normalize_text(text)
+                # attach sarvam metadata for downstream debugging
+                input_meta = {"input_type": payload_type, "raw_input_url": raw_input_url, "customer_phone": req.customer_phone, "sarvam_meta": meta}
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"Image fetch failed: {e}")
 
     else:
         clean_text, _ = normalize_text(payload)
+
+    # Ensure input_meta exists for downstream processing
+    if "input_meta" not in locals():
+        input_meta = {"input_type": payload_type, "raw_input_url": raw_input_url, "customer_phone": req.customer_phone}
 
     # ── 2. LLM EXTRACTION + SKU MATCHING ──────────────────────────
     try:

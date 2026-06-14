@@ -12,6 +12,8 @@ Behavior summary:
 
 Env vars
 - SARVAM_API_KEY (optional for dev)
+ - SARVAM_VISION_PREFER_HANDWRITING (optional; default 1). If set to 1, ingestion will try a handwriting-optimized call first and fall back to generic OCR.
+ - SARVAM_VISION_LANGUAGE (optional). Hint to the Sarvam OCR about the input language (e.g., "hi-IN"). If unset, Sarvam will attempt auto-detection.
 - GEMINI_API_KEY (optional for dev)
 - GEMINI_URL (optional)
 - DEBUG (set to any value to include debug fields in response)
