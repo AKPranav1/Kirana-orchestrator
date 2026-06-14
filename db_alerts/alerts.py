@@ -7,7 +7,7 @@ FIXES APPLIED:
   [Fix 2] Text-Only Default: /log sends text receipt ONLY. No audio for normal orders.
   [Fix 3] Audio is now RESERVED for Vasooli (debt collection) voice notes only.
   [Fix 4] Escalating firmness: reminder_count drives voice settings (calm → firm → stern).
-  REMOVED: send_alert(), format_alert_text(), dual-voice high-value system (simplified).
+  [Fix 5] Amount (money) spoken in ENGLISH ONLY for clarity, rest in native language.
 """
 
 import io
@@ -37,8 +37,7 @@ AUDIO_DIR.mkdir(exist_ok=True)
 
 
 # ── Fix 1: Multilingual Translation Table ─────────────────────────────────────
-# Covers all 10 Sarvam AI supported language codes.
-# ta/te/ml/bn/gu/mr/or/pa → Hindi fallback (safe, never crashes on demo day).
+# Amount placeholder {amount_en} will be replaced with ENGLISH number
 TRANSLATIONS: dict[str, dict[str, str]] = {
     "hi": {
         "receipt_title": "🛒 *Kirana AI Receipt*",
@@ -46,17 +45,17 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "subtotal":      "Subtotal",
         "discount":      "🎉 Bulk Discount (10%)",
         "total":         "💰 *Total*",
-        # Vasooli escalation scripts (reminder_count 1 → 2 → 3)
+        # Vasooli escalation scripts - amount_spoken in ENGLISH
         "vasooli_1": (
             "Namaste {name}. Kirana store se bol rahe hain. "
-            "Aapka khata balance {amount} rupees hai. Kripya payment kar dein. Dhanyavaad."
+            "Aapka khata balance {amount_en} rupees hai. Kripya payment kar dein. Dhanyavaad."
         ),
         "vasooli_2": (
-            "Suniye {name}, aapka khata balance ab {amount} rupees ho gaya hai. "
+            "Suniye {name}, aapka khata balance ab {amount_en} rupees ho gaya hai. "
             "Payment ki date nikal rahi hai. Kripya jaldi clear karein."
         ),
         "vasooli_3": (
-            "ALERT! {name}, aapka balance {amount} rupees limit cross kar chuka hai. "
+            "ALERT! {name}, aapka balance {amount_en} rupees limit cross kar chuka hai. "
             "Khata band kiya ja raha hai. Turant payment karein!"
         ),
     },
@@ -67,16 +66,16 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "discount":      "🎉 ರಿಯಾಯಿತಿ (Discount 10%)",
         "total":         "💰 *ಒಟ್ಟು (Total)*",
         "vasooli_1": (
-            "ನಮಸ್ಕಾರ {name}. ಕಿರಾಣಿ ಅಂಗಡಿಯಿಂದ ಕರೆ ಮಾಡುತ್ತಿದ್ದೇವೆ. "
-            "ನಿಮ್ಮ ಖಾತಾ ಬಾಕಿ {amount} ರೂಪಾಯಿ. ದಯವಿಟ್ಟು ಪಾವತಿಸಿ. ಧನ್ಯವಾದ."
+            "Namaskara {name}. Kirana angadiyinda kare madutiddene. "
+            "Nimma khata balance {amount_en} rupees. Dayavittu payment madiri. Dhanyavada."
         ),
         "vasooli_2": (
-            "ಕೇಳಿ {name}, ನಿಮ್ಮ ಖಾತಾ ಬಾಕಿ ಈಗ {amount} ರೂಪಾಯಿ ಆಗಿದೆ. "
-            "ದಯವಿಟ್ಟು ತಕ್ಷಣ ಪಾವತಿ ಮಾಡಿ."
+            "Keli {name}, nimma khata balance eega {amount_en} rupees aagide. "
+            "Dayavittu tondane clear madiri."
         ),
         "vasooli_3": (
-            "ಎಚ್ಚರಿಕೆ! {name}, ನಿಮ್ಮ ಬಾಕಿ {amount} ರೂಪಾಯಿ ಮೀರಿದೆ. "
-            "ತಕ್ಷಣ ಹಣ ಪಾವತಿಸಿ, ಇಲ್ಲದಿದ್ದರೆ ಖಾತಾ ನಿಲ್ಲಿಸಲಾಗುತ್ತದೆ!"
+            "Echcharike! {name}, nimma balance {amount_en} rupees limit daati hode. "
+            "Tondane payment madiri, illadidare khata suspend agutte!"
         ),
     },
     "en": {
@@ -87,34 +86,15 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "total":         "💰 *Total*",
         "vasooli_1": (
             "Hello {name}. This is a gentle reminder from the Kirana store. "
-            "Your outstanding balance is {amount} rupees. Please make a payment at your earliest convenience."
+            "Your outstanding balance is {amount_en} rupees. Please make a payment at your earliest convenience."
         ),
         "vasooli_2": (
-            "Hi {name}, your outstanding balance has now reached {amount} rupees. "
+            "Hi {name}, your outstanding balance has now reached {amount_en} rupees. "
             "Please clear your dues immediately."
         ),
         "vasooli_3": (
-            "URGENT NOTICE! {name}, your debt of {amount} rupees is overdue. "
+            "URGENT NOTICE! {name}, your debt of {amount_en} rupees is overdue. "
             "Your store credit has been suspended until payment is received."
-        ),
-    },
-    "te": {
-        "receipt_title": "🛒 *కిరాణా AI రసీదు*",
-        "customer":      "👤 కస్టమర్ (Customer)",
-        "subtotal":      "ఉపమొత్తం (Subtotal)",
-        "discount":      "🎉 తగ్గింపు (Discount 10%)",
-        "total":         "💰 *మొత్తం (Total)*",
-        "vasooli_1": (
-            "నమస్కారం {name}. కిరాణా స్టోర్ నుండి మాట్లాడుతున్నాం. "
-            "మీ ఖాతా బ్యాలెన్స్ {amount} రూపాయలు. దయచేసి పేమెంట్ చేయండి. ధన్యవాదాలు."
-        ),
-        "vasooli_2": (
-            "వినండి {name}, మీ ఖాతా బ్యాలెన్స్ ఇప్పుడు {amount} రూపాయలు అయింది. "
-            "దయచేసి వెంటనే క్లియర్ చేయండి."
-        ),
-        "vasooli_3": (
-            "హెచ్చరిక! {name}, మీ బ్యాలెన్స్ {amount} రూపాయలు లిమిట్ దాటింది. "
-            "వెంటనే పేమెంట్ చేయండి, లేకపోతే ఖాతా ఆపివేయబడుతుంది!"
         ),
     },
 }
@@ -315,7 +295,7 @@ def _send_audio_whatsapp(audio_filename: str, phone: str, body: str) -> None:
     print(f"[Twilio] ✅ Audio → {phone} | URL={audio_url} | SID={message.sid}")
 
 
-# ── Fix 3 + Fix 4: Escalating Vasooli Voice Notes ────────────────────────────
+# ── Fix 3 + Fix 4 + Fix 5: Escalating Vasooli Voice Notes with English Amount ──
 def send_vasooli_alert(
     customer_name: str,
     customer_phone: str,
@@ -330,25 +310,29 @@ def send_vasooli_alert(
       Level 1 → Polite  (stability=0.70, style=0.00) — calm, friendly
       Level 2 → Firm    (stability=0.50, style=0.40) — serious tone
       Level 3 → Stern   (stability=0.30, style=0.80) — urgent, assertive
-
-    Returns the generated audio filename.
+    
+    Fix 5 — Amount (money) is spoken in ENGLISH ONLY for clarity.
+      Example: "1500" spoken as "fifteen hundred" or "one thousand five hundred"
     """
     level = min(reminder_count, 3)  # Hard cap — no escalation beyond stern
-
+    
+    # Format the amount in English words for clarity
+    amount_in_english = _format_amount_in_english(outstanding_amount)
+    
     if level == 1:
-        text     = _get_text(lang, "vasooli_1", name=customer_name, amount=outstanding_amount)
+        text     = _get_text(lang, "vasooli_1", name=customer_name, amount_en=amount_in_english)
         settings = {
             "stability": 0.70, "similarity_boost": 0.75,
             "style": 0.00, "use_speaker_boost": True,
         }
     elif level == 2:
-        text     = _get_text(lang, "vasooli_2", name=customer_name, amount=outstanding_amount)
+        text     = _get_text(lang, "vasooli_2", name=customer_name, amount_en=amount_in_english)
         settings = {
             "stability": 0.50, "similarity_boost": 0.85,
             "style": 0.40, "use_speaker_boost": True,
         }
     else:  # level == 3
-        text     = _get_text(lang, "vasooli_3", name=customer_name, amount=outstanding_amount)
+        text     = _get_text(lang, "vasooli_3", name=customer_name, amount_en=amount_in_english)
         settings = {
             "stability": 0.30, "similarity_boost": 0.95,
             "style": 0.80, "use_speaker_boost": True,
@@ -357,7 +341,7 @@ def send_vasooli_alert(
     urgency_emojis = {1: "🙏", 2: "⚠️", 3: "🚨"}
     emoji = urgency_emojis[level]
 
-    print(f"[Vasooli] {emoji} Level {level} reminder → {customer_name} | ₹{outstanding_amount}")
+    print(f"[Vasooli] {emoji} Level {level} reminder → {customer_name} | ₹{outstanding_amount} (spoken: {amount_in_english})")
 
     audio_filename = generate_audio(text, settings)
 
@@ -372,3 +356,52 @@ def send_vasooli_alert(
     )
 
     return audio_filename
+
+
+def _format_amount_in_english(amount: float) -> str:
+    """
+    Convert a numeric amount to English words for clear speech.
+    Example: 1250 -> "one thousand two hundred fifty"
+             1500 -> "fifteen hundred" OR "one thousand five hundred"
+             45 -> "forty five"
+    """
+    amount_int = int(round(amount))
+    
+    if amount_int == 0:
+        return "zero"
+    
+    # Handle amounts up to 99999
+    if amount_int >= 100000:
+        lakhs = amount_int // 100000
+        remainder = amount_int % 100000
+        if remainder > 0:
+            return f"{_format_number_words(lakhs)} lakh {_format_number_words(remainder)}"
+        return f"{_format_number_words(lakhs)} lakh"
+    
+    return _format_number_words(amount_int)
+
+
+def _format_number_words(n: int) -> str:
+    """Convert integer to English words."""
+    if n == 0:
+        return "zero"
+    
+    ones = ["", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine",
+            "ten", "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen",
+            "seventeen", "eighteen", "nineteen"]
+    
+    tens = ["", "", "twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety"]
+    
+    if n < 20:
+        return ones[n]
+    
+    if n < 100:
+        return tens[n // 10] + ("" if n % 10 == 0 else " " + ones[n % 10])
+    
+    if n < 1000:
+        return ones[n // 100] + " hundred" + ("" if n % 100 == 0 else " " + _format_number_words(n % 100))
+    
+    if n < 100000:
+        return _format_number_words(n // 1000) + " thousand" + ("" if n % 1000 == 0 else " " + _format_number_words(n % 1000))
+    
+    return str(n)  # fallback

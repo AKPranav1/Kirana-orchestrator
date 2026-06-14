@@ -28,6 +28,17 @@ class SKUMatcher:
         if not name:
             return name, None, 0.0
         key = name.lower().strip()
+        
+        # Skip khata inquiry words - don't match them to products
+        khata_keywords = [
+            "khata", "खाता", "कितना", "हुआ", "बकाया", "balance", "account",
+            "बाकी", "कितने", "कितनी", "outstanding", "due", "बचा", "remaining",
+            "मेरा खाता", "खाते इष्टु", "खाता कितना", "कितना हुआ", "खाता बैलेंस"
+        ]
+        if any(kw in key for kw in khata_keywords):
+            print(f"[sku_match] khata inquiry detected: {key!r} -> skipping product match", flush=True)
+            return name, None, 0.0
+        
         import re
 
         # 1) Exact alias

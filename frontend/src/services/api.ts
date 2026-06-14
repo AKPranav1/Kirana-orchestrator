@@ -77,10 +77,10 @@ export const apiClient = {
       const json = await res.json();
       let customers = json.customers || [];
 
-      // 2. Fetch all khata balances (to compute khataBalance, order_count, lifetime_spend)
+      // 2. Fetch all khata balances (to compute khataBalance)
       const khataRes = await fetch(`${DB_ALERTS_BASE}/khata`);
       const khataData = await khataRes.json();
-      const khataMap = new Map(); // key: customerName -> total_outstanding
+      const khataMap = new Map();
       if (khataData.records) {
         khataData.records.forEach((rec: any) => {
           const name = rec.customer_name;
@@ -89,7 +89,7 @@ export const apiClient = {
         });
       }
 
-      // 3. Fetch all orders to compute avgBasket and lifetimeSpend if missing
+      // 3. Fetch all orders to compute orderCount, lifetimeSpend, avgBasket
       const ordersRes = await fetch(DB_ALERTS_ORDERS);
       let ordersMap = new Map(); // key: customerName -> { totalSpend, orderCount }
       if (ordersRes.ok) {
@@ -99,18 +99,20 @@ export const apiClient = {
           const name = order.customer_name || order.customerName;
           if (!name) continue;
           const amount = order.total_amount || order.totalAmount || 0;
-          if (!ordersMap.has(name)) ordersMap.set(name, { totalSpend: 0, orderCount: 0 });
+          if (!ordersMap.has(name)) {
+            ordersMap.set(name, { totalSpend: 0, orderCount: 0 });
+          }
           const entry = ordersMap.get(name);
           entry.totalSpend += amount;
           entry.orderCount += 1;
         }
       }
 
-      // 4. Enrich each customer
+      // 4. Enrich each customer with order data
       const enriched: Customer[] = customers.map((c: any) => {
         const name = c.customer_name || c.name || "";
         const outstanding = khataMap.get(name) || 0;
-        // Frontend expects khataBalance negative for overdue (money owed by customer)
+        // Frontend expects khataBalance negative for money owed by customer
         const khataBalance = -outstanding;
         const orderStats = ordersMap.get(name) || { totalSpend: 0, orderCount: 0 };
         const lifetimeSpend = c.lifetime_spend ?? orderStats.totalSpend;
@@ -129,6 +131,7 @@ export const apiClient = {
           khataBalance,
           avgBasket,
           lifetimeSpend,
+          orderCount,  // <-- MAKE SURE THIS IS INCLUDED
           lastOrderDate: c.last_order_at || undefined,
         };
       });
