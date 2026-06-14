@@ -24,8 +24,10 @@ from mongo_connector import (
     get_khata_balance,
     increment_reminder_count,
     get_db,
+    check_inventory_for_upsell # <-- Imported our new Upsell function
 )
 from alerts import send_receipt_only, send_vasooli_alert, create_text_bill, _normalize_phone
+from twilio.rest import Client # <-- Imported Twilio for the upsell message
 
 load_dotenv()
 
@@ -124,19 +126,18 @@ def ping_mongo():
 
 
 # ── Core: Receive Order ────────────────────────────────────────────────────────
-# ── Core: Receive Order ────────────────────────────────────────────────────────
 @app.post("/log", tags=["core"])
 async def log_endpoint(req: LogRequest):
     """
     Called by Person 1's webhook router after an order arrives.
     """
     raw_payload = req.order or {}
+    
     # Support ingestion returning a batch of flat orders
     if isinstance(raw_payload, dict) and "batch_orders" in raw_payload:
         orders = raw_payload.get("batch_orders", [])
         results = []
         for o in orders:
-            # Skip empty orders to avoid creating zero-value records and noisy receipts
             if not o.get("items") or len(o.get("items", [])) == 0:
                 print(f"[log] ⚠️ Skipping empty batch order (no items): {o}")
                 results.append({"status": "skipped", "reason": "no_items_parsed", "order": o})
@@ -144,13 +145,11 @@ async def log_endpoint(req: LogRequest):
             try:
                 order_id, order_doc, highest_debt = db_log_order(o, req.shopkeeper_phone)
 
-                # Send shopkeeper receipt (always)
                 try:
                     send_receipt_only(order_doc, req.shopkeeper_phone)
                 except Exception as e:
                     print(f"[DB+ALERT] failed to send shopkeeper receipt for {order_id}: {e}")
 
-                # Send customer receipt if we have a valid customer phone and it's different
                 cust_phone = order_doc.get("customer_phone", "")
                 phone_digits = "".join(c for c in cust_phone if c.isdigit())
                 if len(phone_digits) >= 10 and (_normalize_phone(cust_phone) != _normalize_phone(req.shopkeeper_phone)):
@@ -159,7 +158,6 @@ async def log_endpoint(req: LogRequest):
                     except Exception as e:
                         print(f"[DB+ALERT] failed to send customer receipt for {order_id}: {e}")
 
-                # Auto-Vasooli if khata order crossed the warning limit
                 alert_status = "success"
                 try:
                     if order_doc.get("payment_mode", "").lower() == "khata" and highest_debt > DEBT_WARNING_LIMIT:
@@ -176,6 +174,7 @@ async def log_endpoint(req: LogRequest):
             except Exception as e:
                 results.append({"status": "error", "error": str(e), "order": o})
         return JSONResponse(status_code=200, content={"batch": results})
+
     if not isinstance(raw_payload, dict):
         print("[/log] ⚠️ Received non-dict payload; coercing to empty dict for safety")
         raw_payload = {}
@@ -183,8 +182,6 @@ async def log_endpoint(req: LogRequest):
     clean_order = None
 
     # ── THE ADAPTER: Convert Person 2's messy nested JSON into Person 3's clean format ──
-
-    # 1. Try strict validation first — flat order sent directly by ingestion
     try:
         candidate = FlatOrder.model_validate(raw_payload)
         clean_order = candidate.model_dump()
@@ -192,8 +189,6 @@ async def log_endpoint(req: LogRequest):
     except Exception:
         clean_order = None
 
-    # 2. Fast-path: already-flat dict (has customer_name + items) but didn't
-    #    pass strict FlatOrder validation (e.g. missing store_id)
     if clean_order is None and "customer_name" in raw_payload and "items" in raw_payload:
         clean_order = raw_payload
         clean_order.setdefault("customer_phone", req.shopkeeper_phone)
@@ -201,7 +196,6 @@ async def log_endpoint(req: LogRequest):
         clean_order.setdefault("payment_mode", "cash")
         clean_order.setdefault("split_with", [])
 
-    # 3. Legacy nested 'processed_splits' format
     if clean_order is None and raw_payload.get("processed_splits"):
         clean_order = {
             "customer_name": "Unknown",
@@ -223,15 +217,13 @@ async def log_endpoint(req: LogRequest):
                 }
             )
 
-        # Extra buyers go into split_with
         for extra_split in raw_payload["processed_splits"][1:]:
             clean_order["split_with"].append(
                 extra_split.get("buyer_name", "Unknown")
             )
 
-    # 4. Last resort: nothing usable came through (e.g. ingestion error → {})
-        if clean_order is None:
-            clean_order = {
+    if clean_order is None:
+        clean_order = {
             "customer_name": raw_payload.get("customer_name", "Unknown"),
             "customer_phone": raw_payload.get("customer_phone", req.shopkeeper_phone),
             "language": raw_payload.get("language", "hi"),
@@ -241,21 +233,39 @@ async def log_endpoint(req: LogRequest):
         }
 
     print(f"\n[/log] 📥 Adapted Order for DB: {clean_order}")
-    print(
-        f"[/log]    Mode={clean_order['payment_mode']} | Lang={clean_order['language']}"
-    )
-    # ───────────────────────────────────────────────────────────────────────────────────
+    print(f"[/log]    Mode={clean_order['payment_mode']} | Lang={clean_order['language']}")
 
-    # If there are no items, do not persist an empty order. Return a skipped result so the
-    # caller (ingestion/webhook) can prompt the user for clarification instead of creating
-    # noisy zero-value orders and receipts.
     if not clean_order.get("items") or len(clean_order.get("items", [])) == 0:
         print(f"[/log] ⚠️ Skipping persist: no items parsed for {clean_order.get('customer_name')} | phone={clean_order.get('customer_phone')}")
         return JSONResponse(status_code=200, content={"status": "skipped", "reason": "no_items_parsed", "order": clean_order})
 
     try:
+        db = get_db()
+        
+        # ── 🚀 THE QUICK-COMMERCE UPSELL INTERCEPTOR ──
+        upsell_data = check_inventory_for_upsell(db, clean_order.get("items", []))
+        
+        if upsell_data:
+            TWILIO_ACCOUNT_SID = os.getenv("TWILIO_ACCOUNT_SID")
+            TWILIO_AUTH_TOKEN  = os.getenv("TWILIO_AUTH_TOKEN")
+            TWILIO_WA_FROM     = os.getenv("TWILIO_WHATSAPP_FROM")
+            
+            if TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN:
+                client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
+                client.messages.create(
+                    from_=TWILIO_WA_FROM,
+                    to=_normalize_phone(clean_order["customer_phone"]),
+                    body=upsell_data["message"]
+                )
+            
+            print("[/log] 🛑 Order paused. Out of stock detected. Upsell sent to customer.")
+            return JSONResponse(status_code=200, content={
+                "status": "upsell_sent",
+                "message": "Out of stock detected. Upsell WhatsApp sent to customer."
+            })
+        # ──────────────────────────────────────────────
+
         # Step 1: MongoDB (critical — must succeed before anything else)
-        # PASS 'clean_order', NOT 'req.order'
         order_id, order_doc, highest_debt = db_log_order(
             clean_order, req.shopkeeper_phone
         )
@@ -263,10 +273,8 @@ async def log_endpoint(req: LogRequest):
         alert_status = "success"
 
         try:
-            # Step 2: Text receipt to shopkeeper (no audio for normal orders)
             send_receipt_only(order_doc, req.shopkeeper_phone)
 
-            # Step 3: Auto-Vasooli if khata debt crossed the warning limit
             if (
                 order_doc.get("payment_mode", "").lower() == "khata"
                 and highest_debt > DEBT_WARNING_LIMIT
@@ -279,24 +287,18 @@ async def log_endpoint(req: LogRequest):
                     name = order_doc["customer_name"]
                     count = increment_reminder_count(name, order_doc["store_id"])
 
-                    print(
-                        f"[/log] 🚨 Auto-Vasooli L{count} → {name} | debt=₹{highest_debt}"
-                    )
+                    print(f"[/log] 🚨 Auto-Vasooli L{count} → {name} | debt=₹{highest_debt}")
                     send_vasooli_alert(name, customer_phone, highest_debt, count, lang)
                     alert_status = "text_receipt_and_auto_vasooli_sent"
                 else:
-                    print(
-                        f"[/log] ⚠️ Debt ₹{highest_debt} > limit but no valid phone for {order_doc['customer_name']} — Vasooli skipped"
-                    )
+                    print(f"[/log] ⚠️ Debt ₹{highest_debt} > limit but no valid phone for {order_doc['customer_name']} — Vasooli skipped")
                     alert_status = "vasooli_skipped_no_phone"
 
         except Exception as api_err:
             print(f"[/log] ⚠️ DB OK but alert API error: {api_err}")
             alert_status = f"api_failed: {api_err}"
 
-        print(
-            f"[/log] ✅ order_id={order_id} | total=₹{order_doc.get('total_amount')} | {alert_status}\n"
-        )
+        print(f"[/log] ✅ order_id={order_id} | total=₹{order_doc.get('total_amount')} | {alert_status}\n")
 
         response_order = dict(order_doc)
         response_order["created_at"] = str(response_order.get("created_at", ""))
@@ -315,13 +317,10 @@ async def log_endpoint(req: LogRequest):
         print(f"[/log] ❌ CRITICAL DB ERROR: {e}\n")
         raise HTTPException(status_code=500, detail=str(e))
 
+
 # ── Core: Manual Vasooli ───────────────────────────────────────────────────────
 @app.post("/vasooli", tags=["core"])
 async def vasooli_endpoint(req: VasooliRequest):
-    """
-    Manual debt-collection voice note triggered from the shopkeeper dashboard.
-    Each call increments reminder_count → progressively firmer tone.
-    """
     phone_digits = "".join(c for c in req.customer_phone if c.isdigit())
     if len(phone_digits) < 10:
         return JSONResponse(
@@ -349,9 +348,7 @@ async def vasooli_endpoint(req: VasooliRequest):
         )
 
     count = increment_reminder_count(req.customer_name, req.store_id)
-    print(
-        f"[/vasooli] 📤 Manual Level {count} reminder → {req.customer_name} (₹{outstanding})"
-    )
+    print(f"[/vasooli] 📤 Manual Level {count} reminder → {req.customer_name} (₹{outstanding})")
 
     try:
         audio = send_vasooli_alert(
@@ -373,12 +370,10 @@ async def vasooli_endpoint(req: VasooliRequest):
 # ── Read: Orders ───────────────────────────────────────────────────────────────
 @app.get("/orders", tags=["read"])
 def list_orders(limit: int = 20):
-    """Most recent N orders — used by the React LiveOrders page."""
     db = get_db()
     cursor = db["orders"].find({}, {"_id": 0}).sort("created_at", -1).limit(limit)
     docs = []
     for d in cursor:
-        # Normalize field names for frontend compatibility: 'order_id' -> 'id'
         d["created_at"] = str(d.get("created_at", ""))
         if "order_id" in d:
             d["id"] = d.pop("order_id")
@@ -398,7 +393,6 @@ def get_receipt(order_id: str):
 # ── Read: Khata ────────────────────────────────────────────────────────────────
 @app.get("/khata/{customer_name}", tags=["read"])
 def get_khata(customer_name: str, store_id: str = "store_001"):
-    """Full khata ledger for a customer — used by the React KhataLedger page."""
     doc = get_khata_balance(customer_name, store_id)
     if not doc:
         raise HTTPException(status_code=404, detail=f"No khata for {customer_name}")
@@ -413,7 +407,6 @@ def get_khata(customer_name: str, store_id: str = "store_001"):
 # ── Read: Customers ────────────────────────────────────────────────────────────
 @app.get("/customers/leaderboard", tags=["read"])
 def get_loyalty_leaderboard(limit: int = 10, store_id: str = "store_001"):
-    """Top customers by lifetime spend — used by the React Customers page."""
     db = get_db()
     cursor = (
         db["customers"]
@@ -431,10 +424,6 @@ def get_loyalty_leaderboard(limit: int = 10, store_id: str = "store_001"):
 # ── Read: Dashboard Aggregates ─────────────────────────────────────────────────
 @app.get("/dashboard", tags=["read"])
 def dashboard_metrics():
-    """
-    Derived aggregates for the React Dashboard page.
-    Uses get_db() (the public alias) — no internal _get_db import needed.
-    """
     db = get_db()
     today = datetime.now(timezone.utc).date()
     day_start = datetime.combine(today, time.min).replace(tzinfo=timezone.utc)
@@ -487,10 +476,6 @@ def dashboard_metrics():
 # ── Read: Flattened Khata Transactions (new) ───────────────────────────────────
 @app.get("/khata", tags=["read"])
 def list_khata_transactions(store_id: str = "store_001"):
-    """Return a flattened list of khata transactions across all customers for the dashboard/client.
-    Each khata document stores an `entries` array — this endpoint normalizes them to individual
-    transaction objects so the frontend can display a chronological ledger stream.
-    """
     db = get_db()
     txns = []
     cursor = db["khata"].find(
@@ -502,7 +487,7 @@ def list_khata_transactions(store_id: str = "store_001"):
             txns.append(
                 {
                     "id": f"{customer_name}-{e.get('order_id')}-{idx}",
-                    "customerId": customer_name,  # note: customerName used as id here for compatibility
+                    "customerId": customer_name,
                     "customerName": customer_name,
                     "type": "credit",
                     "amount": e.get("amount", 0),
@@ -510,7 +495,6 @@ def list_khata_transactions(store_id: str = "store_001"):
                     "description": f"Order {e.get('order_id')}",
                 }
             )
-    # sort by date descending
     try:
         txns.sort(key=lambda x: x.get("date") or "", reverse=True)
     except Exception:
@@ -521,11 +505,6 @@ def list_khata_transactions(store_id: str = "store_001"):
 # ── ML: Forecasts ──────────────────────────────────────────────────────────────
 @app.get("/forecast", tags=["ml"])
 def get_forecast(limit: int = 50):
-    """
-    Returns per-SKU forecasts produced by the offline ML training script.
-    Run ML/generate_data.py then ML/train_xgboost.py to regenerate model_forecasts.pkl.
-    Returns 503 if the model file hasn't been generated yet.
-    """
     if _forecasts_payload is None:
         raise HTTPException(
             status_code=503,
@@ -541,7 +520,6 @@ def list_products():
     cursor = db["products"].find({}, {"_id": 0})
     prods = []
     for p in cursor:
-        # normalize timestamps
         if "created_at" in p:
             p["created_at"] = str(p.get("created_at", ""))
         prods.append(p)
@@ -599,9 +577,6 @@ def create_customer(customer: dict):
 # --- Khata transaction (ad-hoc) --------------------------------------------
 @app.post("/khata/tx", tags=["write"])
 def post_khata_tx(tx: dict):
-    """Payload: { customerId, type: 'credit'|'payment', amount, description }
-    customerId is treated as customer_name for compatibility with current stores.
-    """
     db = get_db()
     name = tx.get("customerId") or tx.get("customerName") or tx.get("customer_name")
     if not name:
@@ -621,7 +596,7 @@ def post_khata_tx(tx: dict):
                 return_document=True,
         )
     else:
-        # payment reduces outstanding
+        from pymongo import ReturnDocument
         res = db["khata"].find_one_and_update(
             {"customer_name": name},
             {"$push": {"entries": entry}, "$inc": {"total_outstanding": -amount}, "$set": {"last_updated": now}},
@@ -681,7 +656,6 @@ def approve_po(po_id: str):
     res = db["purchase_orders"].find_one_and_update({"id": po_id}, {"$set": {"status": "In Transit", "estimatedDelivery": "Est. in 2 days", "deliveryProgress": 10}}, return_document=ReturnDocument.AFTER)
     if not res:
         raise HTTPException(status_code=404, detail="Purchase order not found")
-    # bump supplier outstanding if totalAmount present
     try:
         sup_id = res.get("supplierId")
         amt = res.get("totalAmount") or res.get("total_amount") or 0
@@ -700,7 +674,6 @@ def receive_po(po_id: str):
     res = db["purchase_orders"].find_one_and_update({"id": po_id}, {"$set": {"status": "Delivered", "deliveryProgress": 100}}, return_document=ReturnDocument.AFTER)
     if not res:
         raise HTTPException(status_code=404, detail="Purchase order not found")
-    # credit product stock
     try:
         products_col = db["products"]
         for item in res.get("items", []):
@@ -753,7 +726,6 @@ def save_settings(settings: dict):
 @app.get("/analytics", tags=["read"])
 def get_analytics():
     db = get_db()
-    # Simple khata ageing buckets
     ageing_buckets = [
         {"range": "0-7 days", "amount": 0},
         {"range": "8-15 days", "amount": 0},
@@ -786,12 +758,10 @@ def get_analytics():
     analytics = {"khata_ageing": ageing_buckets}
     return {"analytics": analytics}
 
+
 @app.get("/customers/lookup")
 def lookup_customer(phone: str):
     db = get_db()
-    # _update_customer_lifetime_value() writes "customer_phone" / "customer_name",
-    # so query those field names. Also tolerate "phone" / "name" in case a
-    # customer was manually created via POST /customers with those keys.
     doc = db["customers"].find_one(
         {"$or": [{"customer_phone": phone}, {"phone": phone}]},
         {"_id": 0, "customer_name": 1, "name": 1},

@@ -129,21 +129,32 @@ def _resolve_customer_name(order: dict) -> str:
 
 
 # ── Pricing ────────────────────────────────────────────────────────────────────
-def _enrich_items_with_prices(items: list) -> tuple[list, float]:
+def _enrich_items_with_prices(db, items: list) -> tuple[list, float]:
     enriched_items   = []
     calculated_total = 0.0
+    products_col = db["products"] # Access the real inventory
 
     for item in items:
+        item_name  = item.get("name", "")
         qty        = float(item.get("qty", 1))
-        unit       = item.get("unit")
-        name       = item.get("name", "")
-        unit_price = _effective_unit_price(name, unit)
-        line_total = round(unit_price * qty, 2)
+        
+        # 1. TRY MONGODB FIRST (Look for the exact brand name)
+        # We use a regex to do a case-insensitive search (e.g., "aashirvaad" matches "Aashirvaad Atta 5kg")
+        db_product = products_col.find_one({"name": {"$regex": item_name, "$options": "i"}})
+        
+        if db_product:
+            unit_price = float(db_product.get("unitPrice", 0.0))
+            print(f"[Pricing] Found {db_product['name']} in DB: ₹{unit_price}")
+        else:
+            # 2. FALLBACK TO PYTHON DICTIONARY (Generic items)
+            unit_price = STORE_PRICES.get(item_name, 0.0)
+            print(f"[Pricing] Brand not found. Using generic price for {item_name}: ₹{unit_price}")
 
+        line_total = unit_price * qty
         item["unit_price"] = unit_price
         item["line_total"] = line_total
         enriched_items.append(item)
-        calculated_total  += line_total
+        calculated_total += line_total
 
     return enriched_items, calculated_total
 
@@ -168,7 +179,7 @@ def _write_order(
     order_id = str(uuid.uuid4())
     now      = datetime.now(timezone.utc)
 
-    enriched_items, raw_total                     = _enrich_items_with_prices(order.get("items", []))
+    enriched_items, raw_total = _enrich_items_with_prices(db, order.get("items", []))
     final_total, discount_applied, original_total = _apply_group_discount(raw_total)
 
     order_doc = {
@@ -308,14 +319,41 @@ def _update_customer_lifetime_value(
             print(f"[MongoDB] ⚠️ Failed to update loyalty for {person}: {e}")
 
 
+def check_inventory_for_upsell(db, items: list) -> dict | None:
+    products_col = db["products"]
+    for item in items:
+        item_name = item.get("name", "")
+        db_product = products_col.find_one({"name": {"$regex": item_name, "$options": "i"}})
+        
+        if db_product and db_product.get("stock_quantity", 0) <= 0:
+            category = db_product.get("category")
+            substitute = products_col.find_one({
+                "category": category, 
+                "stock_quantity": {"$gt": 0},
+                "name": {"$ne": db_product["name"]}
+            })
+            if substitute:
+                sub_name = substitute["name"]
+                orig_name = db_product["name"]
+                upsell_text = (
+                    f"⚠️ *Stock Alert:* Bhaiya, `{orig_name}` abhi stock mein nahi hai. "
+                    f"Par uski jagah `{sub_name}` available hai. \n\n"
+                    f"Saath mein 1 packet Maggi daal doon? 🍜\n\n"
+                    f"👉 Reply *'YES'* to confirm substitution."
+                )
+                print(f"[Upsell Engine] Intercepted out-of-stock {orig_name}. Suggesting {sub_name}.")
+                return {"status": "upsell_required", "message": upsell_text}
+    return None
+
 # ── Public Entry Points ────────────────────────────────────────────────────────
-def log_order(order: dict, shopkeeper_phone: str) -> tuple[str, dict, float]:
+def log_order(order: dict, shopkeeper_phone: str):
     db            = _get_db()
     orders_col    = db["orders"]
     khata_col     = db["khata"]
     customers_col = db["customers"]
 
-    order_id, order_doc = _write_order(orders_col, order, shopkeeper_phone)
+    # Pass 'db' as the first argument here!
+    order_id, order_doc = _write_order(db, orders_col, order, shopkeeper_phone)
     highest_debt        = _update_khata(khata_col, order_doc)
     _update_customer_lifetime_value(customers_col, order_doc)
 
