@@ -36,46 +36,65 @@ async def webhook(request: Request):
             r = await client.post(INGESTION_URL, json={
                 "payload_type": payload_type,
                 "payload": payload,
-                "customer_phone": sender,  # FIX: pass sender as customer_phone
+                "customer_phone": sender,
+                "customer_name": "",  # Will be populated from profile_name if available
             })
             ingestion_resp = r.json()
             print(f"[INGESTION] {ingestion_resp}")
-            # If ingestion directly returned a khata balance response, send it back to the user
+            
+            # Case 1: Khata balance inquiry response
             if isinstance(ingestion_resp, dict) and ingestion_resp.get("type") == "khata_balance":
-                # Send the message back to the customer and short-circuit
                 msg = ingestion_resp.get("message") or "Here is your khata balance."
-                # POST to DB_ALERTS_URL/log to reuse receipt-sending path but mark as simple text
                 await client.post(DB_ALERTS_URL, json={
                     "order": {"customer_phone": sender, "customer_name": ingestion_resp.get("customer_name"), "items": [], "payment_mode": "khata"},
                     "shopkeeper_phone": sender,
                     "profile_name": profile_name,
                     "direct_message": msg,
                 })
-                # Return early since we've handled the webhook
                 twiml = """<?xml version="1.0"?><Response><Message>हमने आपकी खाता जानकारी भेज दी है।</Message></Response>"""
                 return PlainTextResponse(twiml, media_type="application/xml")
+            
+            # Case 2: Batch orders (multiple people splitting)
+            elif isinstance(ingestion_resp, dict) and "batch_orders" in ingestion_resp:
+                batch_orders = ingestion_resp["batch_orders"]
+                print(f"[WEBHOOK] Processing {len(batch_orders)} batch orders...")
+                
+                # Send EACH order individually to Person 3
+                for single_order in batch_orders:
+                    # Ensure phone number is properly formatted
+                    customer_phone = single_order.get("customer_phone", sender)
+                    if not customer_phone.startswith("whatsapp:"):
+                        customer_phone = f"whatsapp:{customer_phone}"
+                    
+                    await client.post(DB_ALERTS_URL, json={
+                        "order": single_order,
+                        "shopkeeper_phone": customer_phone,  # Send receipt to the customer
+                        "profile_name": profile_name,
+                    })
+                    print(f"[DB+ALERT] Batch order sent for {single_order.get('customer_name')} (to={customer_phone})")
+                
+                twiml = """<?xml version="1.0"?><Response><Message>Order split confirmed! Receipts sent.</Message></Response>"""
+                return PlainTextResponse(twiml, media_type="application/xml")
+            
+            # Case 3: Single order
             else:
-                order = ingestion_resp  # normal order flow — pass downstream
+                order = ingestion_resp
+                async with httpx.AsyncClient(timeout=30) as client2:
+                    destination_phone = sender if sender else SHOPKEEPER_PHONE
+                    await client2.post(DB_ALERTS_URL, json={
+                        "order": order,
+                        "shopkeeper_phone": destination_phone,
+                        "profile_name": profile_name,
+                    })
+                    print(f"[DB+ALERT] Single order forwarded to Person 3 (to={destination_phone})")
+                
+                twiml = """<?xml version="1.0"?><Response><Message>Order received! We'll get that ready for you.</Message></Response>"""
+                return PlainTextResponse(twiml, media_type="application/xml")
+                
     except Exception as e:
-        print(f"[INGESTION ERROR] {e}")
-        order = {}
-
-    try:
-        async with httpx.AsyncClient(timeout=30) as client:
-            # Send the receipt to the WhatsApp sender (customer) when available;
-            # fall back to the configured SHOPKEEPER_PHONE for safety.
-            destination_phone = sender if sender else SHOPKEEPER_PHONE
-            await client.post(DB_ALERTS_URL, json={
-                "order": order,
-                "shopkeeper_phone": destination_phone,
-                "profile_name": profile_name,
-            })
-            print(f"[DB+ALERT] order forwarded to Person 3 (to={destination_phone})")
-    except Exception as e:
-        print(f"[DB+ALERT ERROR] {e}")
-
-    twiml = """<?xml version="1.0"?><Response><Message>Order received! We'll get that ready for you.</Message></Response>"""
-    return PlainTextResponse(twiml, media_type="application/xml")
+        print(f"[WEBHOOK ERROR] {e}")
+        twiml = """<?xml version="1.0"?><Response><Message>Sorry, we couldn't process your order. Please try again.</Message></Response>"""
+        return PlainTextResponse(twiml, media_type="application/xml")
 
 
 @app.get("/health")
