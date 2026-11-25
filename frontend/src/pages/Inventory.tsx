@@ -25,6 +25,7 @@ export default function Inventory() {
   const [name, setName] = useState("");
   const [sku, setSku] = useState("");
   const [category, setCategory] = useState("Grains");
+  const [unit, setUnit] = useState('piece');
   const [unitPrice, setUnitPrice] = useState("");
   const [costPrice, setCostPrice] = useState("");
   const [supplierId, setSupplierId] = useState("");
@@ -44,7 +45,7 @@ export default function Inventory() {
   };
 
   const handleUpdateStock = async (id: string) => {
-    if (!editQty || isNaN(parseInt(editQty))) return;
+    if (!editQty || isNaN(parseFloat(editQty))) return;
     try {
       await inventoryService.updateProductStock(id, parseInt(editQty));
       setEditingId(null);
@@ -65,11 +66,12 @@ export default function Inventory() {
         name,
         sku,
         category,
+        unit,
         unitPrice: parseFloat(unitPrice),
         costPrice: parseFloat(costPrice),
         supplierId,
         supplierName: selectedSupplier ? selectedSupplier.name : "Hindustan Unilever",
-        stockQuantity: parseInt(stockQuantity),
+        stockQuantity: parseFloat(stockQuantity),
         status: parseInt(stockQuantity) === 0 ? 'Out of Stock' : parseInt(stockQuantity) < 5 ? 'Low Stock' : 'In Stock'
       });
 
@@ -167,10 +169,15 @@ export default function Inventory() {
               </select>
             </div>
             <div className="space-y-1">
-               <label className="text-[#888888]">Selling price (₹)</label>
+               <label htmlFor="catalogue-unit" className="text-[#888888]">Price and stock unit</label>
+               <select id="catalogue-unit" value={unit} onChange={e => setUnit(e.target.value)} className="w-full bg-[#0F0F0F] border border-[#1F1F1F] rounded-sm p-2 text-white">
+                 {['piece', 'packet', 'bottle', 'kg', 'gm', 'litre'].map(value => <option key={value} value={value}>{value}</option>)}
+               </select>
+               <label className="text-[#888888]">Selling price per {unit} (₹)</label>
               <input 
                 type="number" 
-                value={unitPrice} 
+                min="0.01" step="0.01"
+                value={unitPrice}
                 onChange={(e) => setUnitPrice(e.target.value)}
                 placeholder="245"
                 className="w-full bg-[#0F0F0F] border border-[#1F1F1F] rounded-sm p-2 text-white focus:outline-none"

@@ -15,7 +15,12 @@ import os
 import uuid
 import requests
 from pathlib import Path
-from twilio.rest import Client
+def Client(*args, **kwargs):
+    """Load Twilio only when an explicitly enabled adapter sends a message."""
+    from twilio.rest import Client as TwilioClient
+    from twilio.http.http_client import TwilioHttpClient
+    kwargs.setdefault("http_client", TwilioHttpClient(timeout=15))
+    return TwilioClient(*args, **kwargs)
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -121,32 +126,8 @@ def _normalize_phone(phone: str) -> str:
 
 # ── Fix 2: Text-Only Receipt for Standard Orders ─────────────────────────────
 def create_text_bill(order: dict) -> str:
-    """Builds a WhatsApp-formatted text receipt in the order's language."""
-    lang = order.get("language", "hi")
-
-    bill  = f"{_get_text(lang, 'receipt_title')}\n"
-    bill += f"{_get_text(lang, 'customer')}: {order.get('customer_name', 'Walk-in')}\n"
-    bill += "------------------------\n"
-
-    for item in order.get("items", []):
-        bill += f"▪ {item.get('qty', 1)}x {item.get('name', 'item')} - ₹{item.get('line_total', 0)}\n"
-
-    bill += "------------------------\n"
-    discount = order.get("discount_applied", 0)
-    if discount and discount > 0:
-        bill += f"{_get_text(lang, 'subtotal')}: ₹{order.get('original_total', 0)}\n"
-        bill += f"{_get_text(lang, 'discount')}: -₹{discount}\n"
-
-    bill += f"{_get_text(lang, 'total')}: ₹{order.get('total_amount', 0)}\n"
-
-    split_with = order.get("split_with", [])
-    if split_with:
-        num_parties = len(split_with) + 1
-        per_person  = round(order.get("total_amount", 0) / num_parties, 2)
-        bill += f"\n👥 Split {num_parties} ways: ₹{per_person} each\n"
-        bill += f"   (with: {', '.join(split_with)})\n"
-
-    return bill
+    from backend.domain.receipts import create_text_bill as render
+    return render(order)
 
 
 def send_khata_pdf_via_whatsapp(customer_name: str, phone: str, khata_doc: dict) -> None:

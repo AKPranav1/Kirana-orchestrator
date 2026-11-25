@@ -4,6 +4,7 @@
  */
 
 export interface Product {
+  unit: string;
   id: string;
   name: string;
   sku: string;
@@ -31,6 +32,7 @@ export interface Customer {
 }
 
 export interface KhataTransaction {
+  balanceAfter?: number;
   id: string;
   customerId: string;
   customerName: string;
@@ -49,6 +51,7 @@ export interface Khata {
 }
 
 export interface OrderItem {
+  unit?: string;
   productId: string;
   productName: string;
   quantity: number;
@@ -56,6 +59,9 @@ export interface OrderItem {
 }
 
 export interface Order {
+  customerPhone?: string;
+  payment_mode?: 'cash' | 'upi' | 'khata';
+  requestId?: string;
   id: string;
   customerId?: string;
   customerName: string;
@@ -113,7 +119,7 @@ export interface DashboardMetrics {
   lowStockItemsCount: number;
   pendingDeliveriesCount: number;
   pendingSupplierPay: number;
-  storeHealthScore: number;
+  storeHealthScore: number | null;
 }
 
 export interface AnalyticsTrendPoint {

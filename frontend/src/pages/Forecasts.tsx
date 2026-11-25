@@ -8,6 +8,7 @@ import { TrendingUp, Sparkles, AlertTriangle, ShieldCheck, ShoppingCart, ArrowRi
 import { Forecast } from '../types';
 import { forecastService } from '../services/forecast';
 import { suppliersService } from '../services/suppliers';
+import { inventoryService } from '../services/inventory';
 
 export default function Forecasts() {
   const [forecasts, setForecasts] = useState<Forecast[]>([]);

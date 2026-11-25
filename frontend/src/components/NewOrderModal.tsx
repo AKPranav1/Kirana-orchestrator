@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { X, Search, Plus, Minus, Check, ShoppingCart } from 'lucide-react';
 import { Product, Customer } from '../types';
 import { inventoryService } from '../services/inventory';
@@ -24,14 +24,14 @@ export default function NewOrderModal({ onClose, onSuccess }: NewOrderModalProps
   const [paymentMethod, setPaymentMethod] = useState<'cash' | 'khata'>('cash');
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
+  const pendingRequest = useRef({ fingerprint: '', id: '' });
 
   useEffect(() => {
     loadData();
   }, []);
 
   const loadData = async () => {
-    const p = await inventoryService.getInventory();
-    const c = await customersService.getCustomers();
+    const [p, c] = await Promise.all([inventoryService.getInventory(), customersService.getCustomers()]);
     setProducts(p);
     setCustomers(c);
   };
@@ -90,12 +90,18 @@ export default function NewOrderModal({ onClose, onSuccess }: NewOrderModalProps
           productId: id,
           productName: p.name,
           quantity: qtyNum,
+          unit: p.unit,
           price: p.unitPrice
         };
       });
 
-      // 1. Create order
+      const fingerprint = JSON.stringify({ selectedCustomerId, items, paymentMethod });
+      if (pendingRequest.current.fingerprint !== fingerprint) {
+        pendingRequest.current = { fingerprint, id: crypto.randomUUID() };
+      }
       const order = await ordersService.createOrder({
+        requestId: pendingRequest.current.id,
+        payment_mode: paymentMethod,
         customerId: selectedCustomerId || undefined,
         customerName: selectedCustomer ? selectedCustomer.name : 'Walk-in Customer',
         customerPhone: selectedCustomer ? selectedCustomer.phone : '',
@@ -105,17 +111,7 @@ export default function NewOrderModal({ onClose, onSuccess }: NewOrderModalProps
         source: 'In-Store'
       });
 
-      // 2. If charged to Khata, record credit transaction
-      if (paymentMethod === 'khata' && selectedCustomerId) {
-        await customersService.addKhataTransaction(
-          selectedCustomerId,
-          'credit',
-          totalAmount,
-          `In-store purchase (Order #${order.id}) – ${items.map(i => `${i.quantity}x ${i.productName}`).join(', ')}`
-        );
-      }
-
-      setMessage("Order placed and processed successfully!");
+      setMessage(`Order saved. Confirmed total: ₹${order.totalAmount.toFixed(2)}`);
       setTimeout(() => {
         onSuccess();
         onClose();

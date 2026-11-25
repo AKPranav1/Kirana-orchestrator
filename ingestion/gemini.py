@@ -1,5 +1,6 @@
 import os
 import re
+import asyncio
 from typing import Optional
 
 from .schema import ParsedOrderPayload, BuyerSplit, RawItem
@@ -88,8 +89,8 @@ async def _gemini_parse(text_content: str) -> Optional[ParsedOrderPayload]:
     except ImportError:
         return None
     try:
-        client = genai.Client(api_key=api_key)
-        response = client.models.generate_content(
+        client = genai.Client(api_key=api_key, http_options=types.HttpOptions(timeout=15000))
+        response = await asyncio.to_thread(client.models.generate_content,
             model="gemini-2.5-flash",
             contents=f"Raw Unprocessed Ingestion Line: {text_content}",
             config=types.GenerateContentConfig(
@@ -114,13 +115,13 @@ async def _groq_parse(text_content: str) -> Optional[ParsedOrderPayload]:
     except ImportError:
         return None
 
-    client = Groq(api_key=api_key)
+    client = Groq(api_key=api_key, timeout=15, max_retries=0)
     messages = [
         {"role": "system", "content": SYSTEM_INSTRUCTION + "\n\nIMPORTANT: Output ONLY a valid JSON object. Do NOT include any extra text, markdown fences, or explanations."},
         {"role": "user", "content": f"Raw Unprocessed Ingestion Line: {text_content}"},
     ]
     try:
-        completion = client.chat.completions.create(
+        completion = await asyncio.to_thread(client.chat.completions.create,
             model="qwen/qwen3-32b",
             messages=messages,
             temperature=0.0,
@@ -265,11 +266,14 @@ def _heuristic_fallback(text_content: str) -> ParsedOrderPayload:
 # ---------------------------------------------------------------------------
 # Public entry point
 # ---------------------------------------------------------------------------
-async def parse_order_text(text_content: str) -> ParsedOrderPayload:
+async def parse_order_text(text_content: str, *, allow_demo: bool = False) -> ParsedOrderPayload:
     result = await _gemini_parse(text_content)
     if result is not None and _has_items(result):
         return result
     result = await _groq_parse(text_content)
     if result is not None and _has_items(result):
         return result
-    return _heuristic_fallback(text_content)
+    if allow_demo:
+        return _heuristic_fallback(text_content)
+    from backend.domain.orders import DomainError
+    raise DomainError("Order extraction unavailable; configure a provider or use manual order entry", 503)

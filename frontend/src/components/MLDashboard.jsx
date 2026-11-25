@@ -1,3 +1,5 @@
+import { apiFetch as fetch } from '../services/http';
+import { API_BASE } from '../config';
 import React, { useState, useEffect } from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { AlertTriangle, TrendingUp, Package, Brain, Zap } from 'lucide-react';
@@ -9,8 +11,9 @@ export default function MLDashboard() {
   useEffect(() => {
     const fetchForecasts = async () => {
       try {
-        const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:8002';
+        const baseUrl = API_BASE;
         const response = await fetch(`${baseUrl}/forecast`);
+        if (!response.ok) throw new Error('Forecasts unavailable');
         const data = await response.json();
         
         const sortedData = data.sort((a, b) => b.recommended_reorder_quantity - a.recommended_reorder_quantity);

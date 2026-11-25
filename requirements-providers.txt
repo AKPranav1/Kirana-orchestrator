@@ -1,0 +1,7 @@
+# Optional integrations; no credentials are needed for manual ordering.
+google-genai>=1.47,<3
+google-cloud-vision>=3.10,<4
+groq>=0.30,<2
+twilio==9.13.0
+requests>=2.32.4,<3
+reportlab>=4.4,<5

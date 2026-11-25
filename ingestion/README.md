@@ -1,26 +1,9 @@
-Kirana AI — Ingestion Service (Person 2)
+# Extraction boundary
 
-This microservice implements the `/process` endpoint used by Person 1's FastAPI router. It accepts a POST with JSON `{payload_type, payload}` where payload_type is one of `text|audio|image` and payload is either raw text or a media URL (Twilio Media URL).
+Run the consolidated backend from the repository root: `uvicorn backend.app:app --port 8000`.
 
-Behavior summary:
-- Converts audio via Sarvam Saaras STT (if SARVAM_API_KEY provided) or uses a deterministic mock.
-- Converts image via Sarvam Vision OCR (if SARVAM_API_KEY provided) or mock.
-- Normalizes Hinglish/Hindi numerals and units into a canonical text string.
-- Calls Gemini (if GEMINI_API_KEY provided) to extract structured JSON; otherwise uses a heuristic mock.
-- Fuzzy-matches item names against `data/sku_catalog.json` using rapidfuzz.
-- Returns an Order JSON matching the agreed schema (unit_price is always null here).
+`POST /process` accepts a request_id, payload_type (text/audio/image), payload and customer details. It returns `{drafts, committed: false, demo_mode}`. Text is interpreted by the configured extraction provider; audio/image URLs must be approved HTTPS Twilio media sources.
 
-Env vars
-- SARVAM_API_KEY (optional for dev)
- - SARVAM_VISION_PREFER_HANDWRITING (optional; default 1). If set to 1, ingestion will try a handwriting-optimized call first and fall back to generic OCR.
- - SARVAM_VISION_LANGUAGE (optional). Hint to the Sarvam OCR about the input language (e.g., "hi-IN"). If unset, Sarvam will attempt auto-detection.
-- GEMINI_API_KEY (optional for dev)
-- GEMINI_URL (optional)
-- DEBUG (set to any value to include debug fields in response)
+Extraction does not price an order, contact a second localhost service, fetch a credit balance or write financial data. Review the returned canonical draft and submit it to `POST /orders` with the same request ID to commit. The server prices against the current catalogue.
 
-Run (dev)
-1. python -m pip install -r requirements.txt
-2. uvicorn main:app --reload --port 8001
-
-Example request (text):
-curl -X POST "http://localhost:8001/process" -H "Content-Type: application/json" -d '{"payload_type":"text","payload":"2 kilo aata aur ek doodh ke packet, Rahul ke saath split karna hai, khate mein daal do"}'
+`POST /transcribe` accepts multipart audio uploads directly, allowing testing without Twilio. Sample results require explicit local demo mode. See the root README for setup and limitations.

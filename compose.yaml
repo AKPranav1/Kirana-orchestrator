@@ -1,0 +1,33 @@
+# Local development only: the Mongo service is not exposed beyond loopback.
+services:
+  mongo:
+    image: mongo:8.0.38
+    command: ["mongod", "--replSet", "rs0", "--bind_ip_all"]
+    ports:
+      - "127.0.0.1:27017:27017"
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      test: ["CMD-SHELL", "mongosh --quiet --eval 'try { if (rs.status().ok !== 1) quit(1) } catch (e) { rs.initiate({_id: \"rs0\", members: [{_id: 0, host: \"mongo:27017\"}]}); quit(1) }'"]
+      interval: 3s
+      timeout: 5s
+      retries: 30
+  api:
+    build:
+      context: .
+      args:
+        INSTALL_PROVIDERS: ${INSTALL_PROVIDERS:-false}
+    env_file: .env
+    environment:
+      KIRANA_ENV: development
+      MONGO_URI: mongodb://mongo:27017/?replicaSet=rs0
+      MONGO_DB_NAME: ${MONGO_DB_NAME:-kirana_ai}
+      STORE_ID: ${STORE_ID:-store_001}
+      NOTIFICATIONS_ENABLED: ${NOTIFICATIONS_ENABLED:-false}
+    ports:
+      - "127.0.0.1:8000:8000"
+    depends_on:
+      mongo:
+        condition: service_healthy
+volumes:
+  mongo-data:

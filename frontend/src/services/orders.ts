@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import { apiFetch as fetch } from './http';
 import { apiClient } from './api';
 import { Order } from '../types';
 import { INGESTION_PROCESS, DB_ALERTS_ORDERS, DB_ALERTS_LOG } from '../config';
@@ -25,7 +26,5 @@ export const ordersService = {
   createOrder: (order: Omit<Order, 'id' | 'createdAt'>): Promise<Order> => {
     return apiClient.createOrder(order);
   },
-  extractOrderFromWhatsApp: (textMsg: string): Promise<{ order: Order | null; error?: string }> => {
-    return apiClient.extractOrderFromWhatsApp(textMsg);
-  }
+  extractOrder: (text: string, customerName?: string) => apiClient.extractOrder(text, customerName),
 };

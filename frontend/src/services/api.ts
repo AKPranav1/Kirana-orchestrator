@@ -5,15 +5,17 @@
 
 import { Product, Customer, Order, Supplier, PurchaseOrder, Forecast, DashboardMetrics, Analytics, Notification, StoreSettings, KhataTransaction } from '../types';
 import { dashboardService } from './dashboard';
+import { apiFetch as fetch, checkedJson } from './http';
+import { submitManualOrder } from './orderCommands';
 import { INGESTION_PROCESS, DB_ALERTS_BASE, DB_ALERTS_ORDERS, DB_ALERTS_LOG } from '../config';
 
 const DEFAULT_SETTINGS: StoreSettings = {
   storeName: "Kirana AI",
   ownerName: "Store Owner",
   phone: "+91 98765 43210",
-  whatsappEnabled: true,
+  whatsappEnabled: false,
   storeStatus: "Online",
-  autoExtractWhatsapp: true,
+  autoExtractWhatsapp: false,
   lowStockThreshold: 5
 };
 
@@ -70,76 +72,18 @@ export const apiClient = {
 
   // --- CUSTOMERS - Get all data including lifetime revenue and order history ---
   getCustomers: async (): Promise<Customer[]> => {
-    try {
-      // 1. Fetch raw customers (leaderboard)
-      const res = await fetch(`${DB_ALERTS_BASE}/customers/leaderboard`);
-      if (!res.ok) throw new Error(`getCustomers ${res.status}`);
-      const json = await res.json();
-      let customers = json.customers || [];
-
-      // 2. Fetch all khata balances (to compute khataBalance)
-      const khataRes = await fetch(`${DB_ALERTS_BASE}/khata`);
-      const khataData = await khataRes.json();
-      const khataMap = new Map();
-      if (khataData.records) {
-        khataData.records.forEach((rec: any) => {
-          const name = rec.customer_name;
-          if (!name) return;
-          khataMap.set(name, rec.total_outstanding || 0);
-        });
-      }
-
-      // 3. Fetch all orders to compute orderCount, lifetimeSpend, avgBasket
-      const ordersRes = await fetch(DB_ALERTS_ORDERS);
-      let ordersMap = new Map(); // key: customerName -> { totalSpend, orderCount }
-      if (ordersRes.ok) {
-        const ordersJson = await ordersRes.json();
-        const orders = ordersJson.orders || [];
-        for (const order of orders) {
-          const name = order.customer_name || order.customerName;
-          if (!name) continue;
-          const amount = order.total_amount || order.totalAmount || 0;
-          if (!ordersMap.has(name)) {
-            ordersMap.set(name, { totalSpend: 0, orderCount: 0 });
-          }
-          const entry = ordersMap.get(name);
-          entry.totalSpend += amount;
-          entry.orderCount += 1;
-        }
-      }
-
-      // 4. Enrich each customer with order data
-      const enriched: Customer[] = customers.map((c: any) => {
-        const name = c.customer_name || c.name || "";
-        const outstanding = khataMap.get(name) || 0;
-        // Frontend expects khataBalance negative for money owed by customer
-        const khataBalance = -outstanding;
-        const orderStats = ordersMap.get(name) || { totalSpend: 0, orderCount: 0 };
-        const lifetimeSpend = c.lifetime_spend ?? orderStats.totalSpend;
-        const orderCount = c.order_count ?? orderStats.orderCount;
-        const avgBasket = orderCount > 0 ? lifetimeSpend / orderCount : 0;
-
-        let status: 'Frequent' | 'Overdue' | 'Standard' = 'Standard';
-        if (khataBalance < -1000) status = 'Overdue';
-        else if (orderCount > 5) status = 'Frequent';
-
-        return {
-          id: c.id || name,
-          name: name,
-          phone: c.customer_phone || c.phone || "",
-          status,
-          khataBalance,
-          avgBasket,
-          lifetimeSpend,
-          orderCount,  // <-- MAKE SURE THIS IS INCLUDED
-          lastOrderDate: c.last_order_at || undefined,
-        };
-      });
-      return enriched;
-    } catch (e) {
-      console.warn('apiClient.getCustomers failed:', e);
-      return [];
+    const customers: any[] = [];
+    for (let offset = 0; ; offset += 200) {
+      const page = await checkedJson(await fetch(`${DB_ALERTS_BASE}/customers/leaderboard?limit=200&offset=${offset}&order_by=name`));
+      customers.push(...page.customers);
+      if (page.customers.length < 200) break;
     }
+    return customers.map((c: any) => ({
+      id: c.customer_name, name: c.customer_name, phone: c.customer_phone || '', status: 'Standard',
+      khataBalance: -Number(c.total_outstanding || 0), lifetimeSpend: c.lifetime_spend || 0,
+      orderCount: c.order_count || 0, avgBasket: c.order_count ? c.lifetime_spend / c.order_count : 0,
+      lastOrderDate: c.last_order_at,
+    }));
   },
 
   addCustomer: async (customer: Omit<Customer, 'id' | 'khataBalance' | 'avgBasket' | 'lifetimeSpend'>): Promise<Customer> => {
@@ -189,6 +133,7 @@ export const apiClient = {
         customerName: khataDoc.customer_name || customerId,
         type: entry.settled ? 'payment' : 'credit',
         amount: Math.abs(entry.amount),
+        balanceAfter: entry.balance_after_paise === undefined ? undefined : entry.balance_after_paise / 100,
         date: entry.date,
         description: entry.description || `Order ${entry.order_id}`,
       }));
@@ -200,59 +145,13 @@ export const apiClient = {
 
   // SIMPLE: add transaction - your backend does the + and -
   addKhataTransaction: async (
-    customerId: string,
-    type: 'credit' | 'payment',
-    amount: number,
-    description: string
+    customerId: string, type: 'credit' | 'payment', amount: number, description: string,
+    requestId: string = crypto.randomUUID()
   ): Promise<{ transaction: KhataTransaction; newBalance: number }> => {
-    try {
-      // Call your existing /khata/tx endpoint
-      const res = await fetch(`${DB_ALERTS_BASE}/khata/tx`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          customerId: customerId,
-          type: type, 
-          amount: amount, 
-          description: description 
-        }),
-      });
-      
-      if (!res.ok) {
-        const errorText = await res.text();
-        throw new Error(`HTTP ${res.status}: ${errorText}`);
-      }
-      
-      const result = await res.json();
-      console.log('Khata transaction result:', result);
-      
-      // Your backend returns { status: "success", transaction: {...} }
-      const transaction = result.transaction;
-      
-      // Get the updated balance by fetching the customer again
-      const khataRes = await fetch(`${DB_ALERTS_BASE}/khata/${encodeURIComponent(customerId)}`);
-      let newBalance = 0;
-      if (khataRes.ok) {
-        const khataDoc = await khataRes.json();
-        newBalance = khataDoc.total_outstanding || 0;
-      }
-      
-      return {
-        transaction: {
-          id: transaction.id,
-          customerId: customerId,
-          customerName: customerId,
-          type: type,
-          amount: amount,
-          date: transaction.date || new Date().toISOString(),
-          description: description,
-        },
-        newBalance: newBalance,
-      };
-    } catch (e) {
-      console.error('addKhataTransaction failed:', e);
-      throw e;
-    }
+    return checkedJson(await fetch(`${DB_ALERTS_BASE}/khata/tx`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ request_id: requestId, customerId, type, amount, description }),
+    }));
   },
 
   // --- ORDERS ---
@@ -298,29 +197,7 @@ export const apiClient = {
     }
   },
 
-  createOrder: async (orderData: Omit<Order, 'id' | 'createdAt'>): Promise<Order> => {
-    try {
-      const r1 = await fetch(INGESTION_PROCESS, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ payload_type: 'flat_order', payload: orderData }),
-      });
-      if (!r1.ok) throw new Error(`ingestion failed ${r1.status}`);
-      const flatOrder = await r1.json();
-
-      const r2 = await fetch(DB_ALERTS_LOG, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ order: flatOrder, shopkeeper_phone: '' }),
-      });
-      if (!r2.ok) throw new Error(`createOrder ${r2.status}`);
-      const persisted = await r2.json();
-      return persisted.order as Order;
-    } catch (e) {
-      console.warn('createOrder failed:', e);
-      throw e;
-    }
-  },
+  createOrder: (orderData: Omit<Order, 'id' | 'createdAt'>): Promise<Order> => submitManualOrder(orderData),
 
   // --- SUPPLIERS ---
   getSuppliers: async (): Promise<Supplier[]> => {
@@ -435,20 +312,11 @@ export const apiClient = {
   
   // --- NOTIFICATIONS ---
   getNotifications: async (): Promise<Notification[]> => {
-    const baseNotifications: Notification[] = [
-      { id: '1', title: 'Low Stock Alert', description: 'Milk stock below 5 units', type: 'warning', createdAt: new Date().toISOString(), isRead: false },
-      { id: '2', title: 'Khata Overdue', description: 'Customer has outstanding balance', type: 'warning', createdAt: new Date().toISOString(), isRead: false },
-    ];
-    const readIds = JSON.parse(localStorage.getItem('readNotificationIds') || '[]');
-    return baseNotifications.map(n => ({ ...n, isRead: readIds.includes(n.id) }));
+    return (await checkedJson(await fetch(`${DB_ALERTS_BASE}/notifications`))).notifications;
   },
 
   markNotificationsAsRead: async (): Promise<void> => {
-    const baseNotifications = [
-      { id: '1' }, { id: '2' }
-    ];
-    const allIds = baseNotifications.map(n => n.id);
-    localStorage.setItem('readNotificationIds', JSON.stringify(allIds));
+    await checkedJson(await fetch(`${DB_ALERTS_BASE}/notifications/mark-read`, { method: 'POST' }));
   },
 
   // --- SETTINGS ---
@@ -481,26 +349,10 @@ export const apiClient = {
   },
 
   // --- WHATSAPP ---
-  extractOrderFromWhatsApp: async (textMsg: string): Promise<{ order: Order | null; error?: string }> => {
-    try {
-      const r1 = await fetch(INGESTION_PROCESS, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ payload_type: 'text', payload: textMsg, customer_phone: 'unknown' }),
-      });
-      if (!r1.ok) return { order: null, error: 'Extraction failed' };
-      const flatOrder = await r1.json();
-
-      const r2 = await fetch(DB_ALERTS_LOG, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ order: flatOrder, shopkeeper_phone: '' }),
-      });
-      if (!r2.ok) return { order: null, error: 'Persist failed' };
-      const persisted = await r2.json();
-      return { order: persisted.order };
-    } catch (e: any) {
-      return { order: null, error: e?.message || String(e) };
-    }
+  extractOrder: async (text: string, customerName = 'Walk-in') => {
+    return checkedJson(await fetch(INGESTION_PROCESS, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ request_id: crypto.randomUUID(), payload_type: 'text', payload: text, customer_name: customerName }),
+    }));
   }
 };

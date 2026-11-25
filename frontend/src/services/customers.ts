@@ -19,7 +19,7 @@ export const customersService = {
     return apiClient.getKhataTransactions(customerId);
   },
 
-  addKhataTransaction: (customerId: string, type: 'credit' | 'payment', amount: number, description: string): Promise<KhataTransaction> => {
-    return apiClient.addKhataTransaction(customerId, type, amount, description);
+  addKhataTransaction: (customerId: string, type: 'credit' | 'payment', amount: number, description: string, requestId?: string): Promise<{ transaction: KhataTransaction; newBalance: number }> => {
+    return apiClient.addKhataTransaction(customerId, type, amount, description, requestId);
   }
 };

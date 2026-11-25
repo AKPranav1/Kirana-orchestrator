@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import { apiFetch as fetch } from './http';
 import { Forecast } from '../types';
 import { DB_ALERTS_FORECAST } from '../config';
 

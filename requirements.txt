@@ -1,0 +1,11 @@
+# Backend runtime, verified on Python 3.11.
+fastapi==0.138.2
+uvicorn==0.50.2
+pydantic==2.13.4
+pymongo==4.20.2
+python-dotenv==1.0.1
+python-multipart==0.0.34
+httpx==0.28.1
+rapidfuzz==3.14.5
+joblib==1.5.1
+tzdata==2025.2

@@ -2,8 +2,9 @@
  * Centralized frontend configuration for backend base URLs.
  * Uses Vite env variables when available, falls back to local defaults for dev.
  */
-export const INGESTION_BASE = (import.meta.env.VITE_INGESTION_URL as string) || 'http://localhost:8001';
-export const DB_ALERTS_BASE = (import.meta.env.VITE_DB_ALERTS_URL as string) || 'http://localhost:8002';
+export const API_BASE = (import.meta.env?.VITE_API_URL as string) || 'http://localhost:8000';
+export const INGESTION_BASE = API_BASE;
+export const DB_ALERTS_BASE = API_BASE;
 
 // Convenience endpoints
 export const INGESTION_PROCESS = `${INGESTION_BASE}/process`;

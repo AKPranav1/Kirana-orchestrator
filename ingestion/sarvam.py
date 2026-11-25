@@ -39,8 +39,12 @@ def _locale(lang_code: str) -> str:
 async def speech_to_text(
     audio_bytes: bytes,
     language_code: str = "unknown",
+    *, filename: str = "audio.ogg", content_type: str = "audio/ogg", allow_demo: bool = False,
 ) -> Tuple[str, dict]:
     if not SARVAM_API_KEY:
+        if not allow_demo:
+            from backend.domain.orders import DomainError
+            raise DomainError("Speech transcription unavailable; configure SARVAM_API_KEY", 503)
         return (
             "bhaiya 2 kilo aata aur ek doodh ka packet, "
             "Rahul ke saath split karo, khate mein daal do",
@@ -53,13 +57,19 @@ async def speech_to_text(
         "model": "saarika:v2.5",
     }
 
-    async with httpx.AsyncClient(timeout=30) as client:
-        files = {"file": ("audio.ogg", audio_bytes, "audio/ogg")}
-        r = await client.post(SARVAM_STT_URL, headers=headers, files=files, data=data)
-        if r.status_code >= 400:
-            raise RuntimeError(f"Sarvam STT {r.status_code}: {r.text[:300]}")
-        resp = r.json()
-        return resp.get("transcript", ""), resp
+    from backend.domain.orders import DomainError
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            files = {"file": (filename, audio_bytes, content_type)}
+            r = await client.post(SARVAM_STT_URL, headers=headers, files=files, data=data)
+            if r.status_code >= 400:
+                raise DomainError("Speech provider rejected the recording; retry or use typed input", 502)
+            resp = r.json()
+            return resp.get("transcript", ""), resp
+    except httpx.TimeoutException as exc:
+        raise DomainError("Speech provider timed out; retry or use typed input", 504) from exc
+    except (httpx.HTTPError, ValueError) as exc:
+        raise DomainError("Speech provider unavailable; retry or use typed input", 502) from exc
 
 
 # ---------------------------------------------------------------------------
@@ -105,12 +115,15 @@ def _run_gcv_ocr_sync(image_bytes: bytes) -> str:
     print(f"[GCV OCR] SDK extracted {len(text)} chars")
     return text
 
-async def vision_ocr(image_bytes: bytes) -> Tuple[str, dict]:
+async def vision_ocr(image_bytes: bytes, *, allow_demo: bool = False) -> Tuple[str, dict]:
     """Async wrapper for GCV OCR. Falls back to mock if no credentials."""
     has_sdk_creds = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
     has_api_key   = os.getenv("GOOGLE_API_KEY")
 
     if not has_sdk_creds and not has_api_key:
+        if not allow_demo:
+            from backend.domain.orders import DomainError
+            raise DomainError("Image extraction unavailable; configure Google Vision credentials", 503)
         print("[WARNING] No GCV credentials. Returning mock OCR data.")
         return "2 kilo aata, ek doodh", {"mock": True}
 
@@ -121,4 +134,5 @@ async def vision_ocr(image_bytes: bytes) -> Tuple[str, dict]:
         return extracted_text, {"status": "success", "engine": "gcv"}
     except Exception as e:
         print(f"[GCV OCR] Exception: {e}")
-        return "", {"error": str(e), "engine": "gcv"}
+        from backend.domain.orders import DomainError
+        raise DomainError("Image extraction provider failed; retry or use text input", 502) from e

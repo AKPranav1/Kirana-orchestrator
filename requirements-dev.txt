@@ -1,0 +1,5 @@
+-r requirements.txt
+pytest==8.4.2
+mongomock==4.3.0
+httpx2==2.16.2
+twilio==9.13.0

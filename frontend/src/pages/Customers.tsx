@@ -3,14 +3,16 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Users, Search, Plus, Star, AlertTriangle, Send, ScrollText, X, Wallet, History } from 'lucide-react';
 import { Customer } from '../types';
 import { customersService } from '../services/customers';
+import { apiFetch as fetch } from '../services/http';
+import { API_BASE } from '../config';
 
 const formatMoney = (value: number): string => {
   let rounded = Math.round((value || 0) * 100) / 100;
-  if (rounded === -0) rounded = 0;
+  if (Object.is(rounded, -0)) rounded = 0;
   return rounded.toFixed(2);
 };
 
@@ -41,6 +43,7 @@ export default function Customers() {
   const [settleAmount, setSettleAmount] = useState("");
   const [settleDesc, setSettleDesc] = useState("Settle partial outstanding ledger");
   const [settleLoading, setSettleLoading] = useState(false);
+  const paymentRequest = useRef({ fingerprint: '', id: '' });
 
   const [showAddForm, setShowAddForm] = useState(false);
   const [newName, setNewName] = useState("");
@@ -88,13 +91,19 @@ export default function Customers() {
     if (!settleCustomer || !settleAmount || parseFloat(settleAmount) <= 0) return;
     setSettleLoading(true);
     try {
+      const fingerprint = JSON.stringify([settleCustomer.name, settleAmount, settleDesc]);
+      if (paymentRequest.current.fingerprint !== fingerprint) {
+        paymentRequest.current = { fingerprint, id: crypto.randomUUID() };
+      }
       await customersService.addKhataTransaction(
         settleCustomer.name,
         'payment',
         parseFloat(settleAmount),
-        settleDesc
+        settleDesc,
+        paymentRequest.current.id
       );
       setSettleAmount("");
+      paymentRequest.current = { fingerprint: '', id: '' };
       setSettleCustomer(null);
       await loadCustomers();
       if (selectedCustomerForHistory?.id === settleCustomer.id) {
@@ -117,7 +126,7 @@ export default function Customers() {
       let balance = 0;
       const entriesWithBalance = sorted.map(t => {
         const amount = t.type === 'credit' ? t.amount : -t.amount;
-        balance += amount;
+        balance = t.balanceAfter ?? (balance + amount);
         return {
           id: t.id,
           type: t.type,
@@ -140,7 +149,7 @@ export default function Customers() {
     setSelectedCustomerForOrders(customer);
     setOrdersLoading(true);
     try {
-      const res = await fetch(`http://localhost:8002/orders`);
+      const res = await fetch(`${API_BASE}/orders`);
       const data = await res.json();
       const allOrders = data.orders || [];
       

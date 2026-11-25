@@ -1,5 +1,12 @@
 .env
 venv/
+.venv/
+.tools/
+.pytest_cache/
+*.pyc
+**/audio_files/
+shared_billing_dump/
+frontend/dist/
 __pycache__/
 
 *output.md

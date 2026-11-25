@@ -3,36 +3,37 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
+import React, { useState, lazy, Suspense } from 'react';
 import Sidebar from './components/Sidebar';
 import Topbar from './components/Topbar';
 
 // Pages import
-import Dashboard from './pages/Dashboard';
-import LiveOrders from './pages/LiveOrders';
-import Customers from './pages/Customers';
-import KhataLedger from './pages/KhataLedger';
-import Inventory from './pages/Inventory';
-import Analytics from './pages/Analytics';
+const Dashboard = lazy(() => import('./pages/Dashboard'));
+const LiveOrders = lazy(() => import('./pages/LiveOrders'));
+const Customers = lazy(() => import('./pages/Customers'));
+const KhataLedger = lazy(() => import('./pages/KhataLedger'));
+const Inventory = lazy(() => import('./pages/Inventory'));
+const Analytics = lazy(() => import('./pages/Analytics'));
 // import Forecasts from './pages/Forecasts'; // Replaced by MLDashboard
-import Reports from './pages/Reports';
-import Settings from './pages/Settings';
+const Reports = lazy(() => import('./pages/Reports'));
+const Settings = lazy(() => import('./pages/Settings'));
 
 // The new ML Dashboard component
-import MLDashboard from './components/MLDashboard';
+const MLDashboard = lazy(() => import('./components/MLDashboard'));
 
 // Reusable action dialogs
 import NewOrderModal from './components/NewOrderModal';
+import OperatorAccess from './components/OperatorAccess';
 
-export default function App() {
+function StoreApp() {
   const [activeTab, setActiveTab] = useState('dashboard');
   const [showNewOrder, setShowNewOrder] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [dataRevision, setDataRevision] = useState(0);
 
   // Success handler for placed orders (triggers reload on active pages if needed)
   const handleOrderSuccess = () => {
-    // Optional refresh trigger, React key updates can act as forced re-mount
-    // Just force state remount logic if needed. Our localStorage makes it work perfectly anyway!
+    setDataRevision(value => value + 1);
   };
 
   const renderActivePage = () => {
@@ -155,8 +156,8 @@ export default function App() {
         />
         
         {/* Viewport Core Render Frame */}
-        <main className="flex-1 p-4 md:p-10 select-none pb-20 max-w-7xl mx-auto w-full">
-          {renderActivePage()}
+          <main key={dataRevision} className="flex-1 p-4 md:p-10 select-none pb-20 max-w-7xl mx-auto w-full">
+          <Suspense fallback={<p role="status" className="text-sm text-[#bcbcbc]">Loading view...</p>}>{renderActivePage()}</Suspense>
         </main>
       </div>
 
@@ -169,4 +170,8 @@ export default function App() {
       )}
     </div>
   );
+}
+
+export default function App() {
+  return <OperatorAccess><StoreApp /></OperatorAccess>;
 }

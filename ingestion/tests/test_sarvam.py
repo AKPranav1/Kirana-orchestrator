@@ -17,10 +17,10 @@ def test_speech_to_text_and_vision_mock():
     os.environ.pop("SARVAM_API_KEY", None)
     sarvam_module.SARVAM_API_KEY = None
     async def _run():
-        text, meta = await speech_to_text(b"fake-audio-bytes")
+        text, meta = await speech_to_text(b"fake-audio-bytes", allow_demo=True)
         assert isinstance(text, str) and meta.get("mock") is True
 
-        vtext, vmeta = await vision_ocr(b"fake-image-bytes")
+        vtext, vmeta = await vision_ocr(b"fake-image-bytes", allow_demo=True)
         assert isinstance(vtext, str)
         assert vmeta.get("mock") is True
 

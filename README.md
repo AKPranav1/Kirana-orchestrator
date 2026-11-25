@@ -1,280 +1,141 @@
-# Kirana AI - Complete Documentation
+# Kirana AI
 
-## Overview
+Voice-enabled order extraction and store operations, originally built as a team hackathon project. This repository now uses one FastAPI backend with explicit domain, application and adapter boundaries.
 
-Kirana AI is an end-to-end enterprise automation platform for Indian Kirana (grocery) stores. It transforms traditional voice/WhatsApp orders into an automated pipeline that handles order processing, credit tracking, and debt collection—all while supporting 10+ Indian languages.
+The current refinement focuses on a reproducible order workflow: catalogue-backed pricing, exact shared-basket allocations, transactional inventory/credit updates, replay-safe commands and optional asynchronous receipts. Manual ordering works without speech, LLM or Twilio credentials.
 
----
+## What works in this increment
 
-## System Architecture
+- Existing React dashboard for products, customers, sales, credit records and purchasing.
+- One backend operation creates a sale, decrements inventory and records any credit.
+- Integer-paise pricing with explicit product identities and unit conversion.
+- Stable request IDs: retrying a command returns its receipt; changed input conflicts.
+- Mongo transactions roll back partial writes. A replica set is required.
+- Shared baskets are one sale with allocations that conserve every paise.
+- Purchase approval/delivery transitions do not duplicate supplier debt or stock.
+- Text/media extraction returns **uncommitted drafts**. Provider failures are explicit.
+- Optional signed WhatsApp ingestion reuses persisted extraction on retries.
+- Optional outbox delivery is leased and retried separately from order commits.
 
-### Microservices (3 Services)
+Multi-turn clarification, conversational confirmation UI and browser voice playback are **not implemented yet**. The API supports recording uploads for transcription; the current browser UI supports manual sales.
 
-| Service | Port | Technology | Responsibility |
-|---------|------|------------|----------------|
-| **Ingestion Service** | 8001 | FastAPI + Google Gemini | Voice/Image/Text → Structured Orders |
-| **Webhook Service** | 8000 | FastAPI + Twilio | WhatsApp message routing |
-| **DB & Alerts Service** | 8002 | FastAPI + MongoDB | Persistence, Khata, Vasooli alerts |
+## Local setup without your old database or Twilio
 
-### Frontend
-- React + TypeScript + Vite
-- Tailwind CSS (dark theme)
-- Recharts for analytics
-- Lucide React for icons
+Requires Docker Compose, Node.js 22+ and npm.
 
----
+1. Copy the root environment template to `.env` and `frontend/.env.example` to `frontend/.env.local`.
+2. Run the backend and its local Mongo replica set:
+   ```sh
+   docker compose up --build -d
+   docker compose exec api python -m backend.seed
+   ```
+3. Run the dashboard:
+   ```sh
+   cd frontend
+   npm ci
+   npm run dev
+   ```
 
-## Core Features
+Open [the dashboard](http://localhost:3000) or [the API reference](http://localhost:8000/docs). Create a sale using the fictional catalogue and Demo Customer. Notifications are disabled.
 
-### 1. Multimodal Order Ingestion
-- **Audio**: Sarvam Saaras STT → Hindi/Kannada/Telugu/Tamil
-- **Image**: Google Cloud Vision OCR
-- **Text**: Direct WhatsApp messages
+Seeding can be repeated: it inserts missing sample records and does not reset existing stock or balances. The 27 sample products and prices are illustrative, not live commercial data.
 
-### 2. AI Processing Pipeline
-```
-Raw Input → Normalization → Gemini/Groq LLM → SKU Matcher → Orchestrator
-```
+The Compose configuration binds both published ports to loopback and uses a single-node replica set. It is a development setup, not a production deployment.
 
-**SKU Matcher** (rapidfuzz):
-- 10+ languages supported via alias mapping
-- 85%+ match accuracy on phonetic variants
-- Khata inquiry detection prevents balance questions from being matched to products
+### Python development
 
-### 3. Khata (Credit) System
-- Outstanding balance tracking
-- Transaction ledger with ageing analysis
-- WhatsApp PDF exports
-- Balance inquiry support in 10+ languages
+Requires Python 3.11+. Run all commands from the repository root.
 
-### 4. Vasooli - Debt Collection
-- Escalating voice notes (Level 1 → 3)
-- ElevenLabs TTS with progressive firmness
-- Amount spoken in English for clarity
-- Auto-triggers when debt exceeds ₹1500
-
-### 5. AI Demand Forecasting
-- XGBoost model (offline training)
-- Stockout prediction (days)
-- Recommended reorder quantities
-- Confidence scores
-
----
-
-## Database Schema (MongoDB)
-
-**Collections:**
-- `orders` - Order history with items, splits
-- `khata` - Customer credit ledger with entries
-- `customers` - Profiles, lifetime value, order count
-- `products` - Inventory, categories, pricing
-- `purchase_orders` - Supplier orders
-- `suppliers` - Vendor management
-- `settings` - Store configuration
-- `notifications` - System alerts
-
----
-
-## Key Integrations
-
-| Service | Purpose |
-|---------|---------|
-| Google Gemini 2.5 Flash | Order extraction (structured JSON) |
-| Groq (Qwen) | Fallback LLM parsing |
-| Sarvam AI | STT (10+ Indic languages) |
-| ElevenLabs | Multilingual TTS for Vasooli |
-| Twilio | WhatsApp messaging |
-| Google Cloud Vision | OCR for images |
-| MongoDB Atlas | Cloud database |
-
----
-
-## Environment Variables
-
-### Ingestion Service (.env in ingestion/)
-```bash
-GEMINI_API_KEY=xxx
-GROQ_API_KEY=xxx
-SARVAM_API_KEY=xxx
-TWILIO_ACCOUNT_SID=xxx
-TWILIO_AUTH_TOKEN=xxx
-DB_ALERTS_URL=http://localhost:8002
+```sh
+python -m venv .venv
+# Activate .venv for your shell.
+python -m pip install -r requirements-dev.txt
+docker compose up -d mongo
+python -m backend.seed
+uvicorn backend.app:app --host 127.0.0.1 --port 8000 --limit-concurrency 64
 ```
 
-### DB & Alerts Service (.env in db_alerts/)
-```bash
-MONGO_URI=mongodb+srv://...
-MONGO_DB_NAME=kirana_ai
-STORE_ID=store_001
-ELEVENLABS_API_KEY=xxx
-ELEVENLABS_VOICE_ID=pNInz6obpgDQGcFmaJgB
-TWILIO_ACCOUNT_SID=xxx
-TWILIO_AUTH_TOKEN=xxx
-TWILIO_WHATSAPP_FROM=whatsapp:+14155238886
-PUBLIC_BASE_URL=http://localhost:8002
+The root `MONGO_URI` can also point at your own Atlas replica set. No teammate credentials or database export are required. Existing hackathon data needs explicit migration/reconciliation before this version will accept it; use a fresh database for the sample deployment.
+
+The old `db_alerts.main:app`, `ingestion.main:app` and `webhook.main:app` imports alias the same application. Do not run three separate backends.
+
+## Architecture
+
+- `backend/app.py`: configuration, lifecycle, authentication, error handling and router composition.
+- `backend/domain/`: validated commands, exact pricing, units, allocations and receipt rendering. No I/O.
+- `backend/services/`: orders, ledger operations and purchasing transitions.
+- `backend/adapters/`: pooled Mongo lifecycle, transactions, bounded media fetches and leased outbox delivery.
+- `backend/api/`: feature routers and compatibility response shapes.
+- `ingestion/`: existing Indic-language normalization, model extraction and SKU matching; no financial writes.
+- `frontend/src/services/`: shared transport and backend contracts.
+
+Read [architecture decisions and limits](docs/architecture.md) before extending these boundaries.
+
+[Verification results](docs/verification.md) include the database-backed checks, browser smoke test and a narrowly scoped local service benchmark.
+
+### Write contract
+
+`POST /orders` requires a stable `request_id`, customer, payment mode and catalogue items. The server ignores client prices/totals and computes the committed result itself.
+
+```json
+{
+  "request_id": "example-sale-0001",
+  "customer_name": "Demo Customer",
+  "payment_mode": "khata",
+  "items": [{"product_id": "rice", "qty": 500, "unit": "gm"}]
+}
 ```
 
-### Webhook Service (.env in webhook/)
-```bash
-INGESTION_URL=http://localhost:8001/process
-DB_ALERTS_URL=http://localhost:8002/log
-SHOPKEEPER_PHONE=whatsapp:+919986013436
-```
+With the sample catalogue this charges ₹30, not 500 times the kilogram price. Repeating the same request creates no second order, stock decrement or credit entry. Preserve the request ID when retrying an uncertain network response. A different intended sale needs a new ID.
 
-### Frontend (.env in frontend/)
-```bash
-VITE_INGESTION_URL=http://localhost:8001
-VITE_DB_ALERTS_URL=http://localhost:8002
-```
+`POST /khata/tx` uses the same command/receipt pattern. Payments exceeding the outstanding balance are rejected. `POST /process` returns drafts; it does not save them. The old `POST /log` accepts `{"order": <canonical command>}` and delegates to the same order service.
 
----
+## Optional AI and messaging
 
-## Deployment
+Install `requirements-providers.txt` in the Python environment to enable the existing provider adapters, then configure the relevant root environment variables. No provider calls are needed for manual sales or the core tests.
 
-### Local Development
-```bash
-# Terminal 1 - DB & Alerts
-cd db_alerts
-python -m venv venv
-source venv/bin/activate  # Windows: venv\Scripts\activate
-pip install -r requirements.txt
-uvicorn main:app --reload --port 8002
+For Docker, set `INSTALL_PROVIDERS=true` in root `.env` and rebuild with `docker compose up --build -d`. Root environment values are supplied to the container; the internal Mongo hostname is intentionally overridden by Compose.
 
-# Terminal 2 - Ingestion
-cd ingestion
-python -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
-uvicorn main:app --reload --port 8001
+- Gemini/Groq: structured extraction. Credentials and provider availability are required.
+- Sarvam: transcription. `POST /transcribe` accepts a recording upload of at most 10 MB.
+- Google Vision: image extraction.
+- Twilio: incoming `/webhook` requires a valid signature and MessageSid. Configure `TWILIO_WEBHOOK_URL` to the exact external URL when behind a proxy.
+- Outgoing receipts: explicitly set `NOTIFICATIONS_ENABLED=true`, configure Twilio and run `python -m backend.worker`.
 
-# Terminal 3 - Webhook
-cd webhook
-python -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
-uvicorn main:app --reload --port 8000
+API and worker must use the same store/database/configuration. Delivery has up to five attempts with expiring leases. It is **at-least-once**: a provider-accepted send followed by a worker crash can duplicate a notification. This cannot recreate a sale. Inspect failed jobs in the database outbox.
 
-# Terminal 4 - Frontend
+With provider dependencies installed in the Docker image, `docker compose run --rm api python -m backend.worker` runs the optional worker using the same configuration.
+
+WhatsApp ingestion retains automatic order submission after extraction; each independent buyer order is atomic, while a multi-buyer batch may partially complete and finish on retry. Conversation-based confirmation is future work. Shared baskets are emitted only once.
+
+`KIRANA_DEMO_MODE=true` explicitly permits deterministic sample speech/OCR and heuristic text extraction during local development. It is never a measured provider result and is prohibited in production mode. Provider failure otherwise returns an actionable error.
+
+The legacy voice debt-reminder adapter remains in `db_alerts/alerts.py`; automatic escalation and the old manual reminder endpoint are not connected to the new financial commit path. They need a separately reviewed scheduling/consent integration.
+
+## Checks
+
+```sh
+python -m pytest -q
 cd frontend
-npm install
-npm run dev
+npm test
+npm run lint
+npm run build
 ```
 
-### Production
-- Use ngrok/Vultr for public URLs
-- Set `PUBLIC_BASE_URL` for audio file serving
-- MongoDB Atlas for persistence
-- Use `--host 0.0.0.0` for public access
+Unit/API tests use an in-memory Mongo-shaped double. Real transaction tests opt in via `KIRANA_TEST_MONGO_URI`, create uniquely named disposable databases and delete only those databases:
 
----
-
-## Sample Order Flow
-
-```
-Customer WhatsApp: "20kg rice for me, 10kg godhi hittu for Abyud"
-    ↓
-Twilio Webhook (Person 2 - Port 8000)
-    ↓
-Ingestion (Person 1 - Port 8001): 
-    STT → Normalize → Gemini → SKU Match → Batch Orders
-    ↓
-DB & Alerts (Person 3 - Port 8002): 
-    Store order → Update Khata → Send receipts
-    ↓
-WhatsApp Receipts to each customer
-    ↓
-Vasooli (if khata debt > ₹1500)
+```sh
+KIRANA_TEST_MONGO_URI='mongodb://localhost:27017/?replicaSet=rs0&directConnection=true' python -m pytest tests/integration -q
 ```
 
----
+PowerShell: set `$env:KIRANA_TEST_MONGO_URI` first, then run pytest. CI runs both the backend tests against a real replica set and the frontend checks. Integration coverage includes concurrent replay, rollback and concurrent payment protection.
 
-## Supported Languages
+## Deployment and limits
 
-### Full Support
-- Hindi (hi)
-- Kannada (kn)
-- English (en)
+Production mode requires `KIRANA_ENV=production`, a 32+ character `KIRANA_API_TOKEN`, explicit `ALLOWED_ORIGINS`, demo mode disabled, TLS and an authenticated Mongo deployment. The dashboard asks for the operator key when the backend requires it; it is kept in session storage, never bundled into the JavaScript.
 
-### Fallback to Hindi
-- Tamil (ta)
-- Telugu (te)
-- Malayalam (ml)
-- Marathi (mr)
-- Gujarati (gu)
-- Bengali (bn)
-- Punjabi (pa)
-- Odia (or)
+This is a single-store operator application. It does not provide individual user roles, multi-tenant isolation, production backups or a public anonymous demo deployment. Enforce request/upload limits at your reverse proxy. Monetary command receipts currently have no expiry so late retries cannot silently create another sale; retention/migration requires a deliberate policy.
 
----
+Read endpoints are bounded, and financial command execution has an overall deadline. The default connection pool and concurrency settings are engineering limits, **not a throughput benchmark**. No production-scale capacity claim is made. The bundled forecast artifact is an offline hackathon snapshot, not a live evaluation of the current store's inventory.
 
-## Performance Metrics
-
-- Order processing: ~3-5 seconds
-- SKU matching accuracy: 88-95%
-- Vasooli voice generation: ~2 seconds
-- Supports 10+ concurrent orders
-
----
-
-## Project Structure
-
-```
-KiranaAI/
-├── db_alerts/              # Person 3 - DB & Alerts
-│   ├── alerts.py           # Twilio/ElevenLabs integration
-│   ├── main.py             # FastAPI server
-│   ├── mongo_connector.py  # MongoDB operations
-│   └── requirements.txt
-├── frontend/               # React Dashboard
-│   ├── src/
-│   │   ├── components/     # UI components
-│   │   ├── pages/          # Dashboard pages
-│   │   └── services/       # API clients
-│   └── package.json
-├── ingestion/              # Person 1 - Order Processing
-│   ├── data/               # SKU catalog
-│   ├── gemini.py           # Gemini/Groq parsing
-│   ├── main.py             # FastAPI server
-│   ├── orchestrator.py     # Order orchestration
-│   ├── sarvam.py           # Sarvam STT/OCR
-│   ├── sku_match.py        # Product matching
-│   └── utils.py            # Normalization utilities
-├── ML/                     # Machine Learning
-│   ├── generate_data.py    # Synthetic data generation
-│   ├── train_xgboost.py    # Model training
-│   └── src/                # Feature engineering
-└── webhook/                # Person 2 - Twilio Webhook
-    └── main.py             # Webhook receiver
-```
-
----
-
-## API Endpoints
-
-### Ingestion Service (Port 8001)
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/process` | POST | Process text/audio/image order |
-| `/health` | GET | Health check |
-
-### DB & Alerts Service (Port 8002)
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/log` | POST | Log order to MongoDB |
-| `/orders` | GET | List recent orders |
-| `/khata/{name}` | GET | Get customer khata ledger |
-| `/khata/tx` | POST | Add khata transaction |
-| `/dashboard` | GET | Dashboard metrics |
-| `/analytics` | GET | Analytics data |
-| `/forecast` | GET | ML forecasts |
-| `/products` | GET/POST | Product CRUD |
-| `/customers` | GET/POST | Customer CRUD |
-| `/suppliers` | GET/POST | Supplier CRUD |
-| `/purchase_orders` | GET/POST | Purchase order CRUD |
-| `/vasooli` | POST | Manual debt collection |
-
-### Webhook Service (Port 8000)
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/webhook` | POST | Twilio webhook receiver |
-| `/health` | GET | Health check |
+The original team implementation and contributions remain in Git history. The refinement preserves that provenance while replacing overlapping billing/write paths.
